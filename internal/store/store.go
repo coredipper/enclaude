@@ -1,4 +1,4 @@
-package vault
+package store
 
 import (
 	"bytes"
@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"filippo.io/age"
-	"github.com/coredipper/claude-vault/internal/config"
-	"github.com/coredipper/claude-vault/internal/crypto"
+	"github.com/coredipper/claude-seal/internal/config"
+	"github.com/coredipper/claude-seal/internal/crypto"
 )
 
 // SealStats tracks what happened during a seal operation.
@@ -43,28 +43,28 @@ func (s UnsealStats) String() string {
 // ProgressFunc is called during long operations to report progress.
 type ProgressFunc func(current, total int, path string)
 
-// Seal encrypts changed files from claudeDir into the vault.
+// Seal encrypts changed files from claudeDir into the seal store.
 func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress ProgressFunc) (SealStats, error) {
 	var stats SealStats
-	vaultDir := cfg.Vault.VaultDir
+	sealDir := cfg.Seal.SealDir
 
-	store := NewObjectStore(vaultDir)
+	store := NewObjectStore(sealDir)
 	if err := store.Init(); err != nil {
 		return stats, fmt.Errorf("initializing object store: %w", err)
 	}
 
 	// Load existing manifest (may be nil on first seal)
-	manifest, err := LoadManifest(vaultDir)
+	manifest, err := LoadManifest(sealDir)
 	if err != nil {
 		return stats, fmt.Errorf("loading manifest: %w", err)
 	}
 	if manifest == nil {
-		manifest = NewManifest(cfg.Vault.DeviceID)
+		manifest = NewManifest(cfg.Seal.DeviceID)
 	}
-	manifest.DeviceID = cfg.Vault.DeviceID
+	manifest.DeviceID = cfg.Seal.DeviceID
 
 	// Scan files
-	files, err := ScanFiles(cfg.Vault.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
+	files, err := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 	if err != nil {
 		return stats, fmt.Errorf("scanning files: %w", err)
 	}
@@ -157,26 +157,26 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 	}
 
 	// Save manifest
-	if err := manifest.Save(vaultDir); err != nil {
+	if err := manifest.Save(sealDir); err != nil {
 		return stats, fmt.Errorf("saving manifest: %w", err)
 	}
 
 	return stats, nil
 }
 
-// Unseal decrypts vault contents back to claudeDir.
+// Unseal decrypts seal contents back to claudeDir.
 func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress ProgressFunc) (UnsealStats, error) {
 	var stats UnsealStats
-	vaultDir := cfg.Vault.VaultDir
+	sealDir := cfg.Seal.SealDir
 
-	store := NewObjectStore(vaultDir)
+	store := NewObjectStore(sealDir)
 
-	manifest, err := LoadManifest(vaultDir)
+	manifest, err := LoadManifest(sealDir)
 	if err != nil {
 		return stats, fmt.Errorf("loading manifest: %w", err)
 	}
 	if manifest == nil {
-		return stats, fmt.Errorf("no manifest found — is the vault initialized?")
+		return stats, fmt.Errorf("no manifest found — is the seal store initialized?")
 	}
 
 	stats.Total = len(manifest.Files)
@@ -187,7 +187,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		if progress != nil {
 			progress(i, stats.Total, relPath)
 		}
-		absPath := filepath.Join(cfg.Vault.ClaudeDir, relPath)
+		absPath := filepath.Join(cfg.Seal.ClaudeDir, relPath)
 
 		// Check if file already exists and matches
 		if existing, err := os.ReadFile(absPath); err == nil {
@@ -237,20 +237,20 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 	return stats, nil
 }
 
-// Status returns the diff between the current claude directory and the vault manifest.
+// Status returns the diff between the current claude directory and the seal manifest.
 func Status(cfg *config.Config) (*DiffResult, error) {
-	manifest, err := LoadManifest(cfg.Vault.VaultDir)
+	manifest, err := LoadManifest(cfg.Seal.SealDir)
 	if err != nil {
 		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
 
-	files, err := ScanFiles(cfg.Vault.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
+	files, err := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 	if err != nil {
 		return nil, fmt.Errorf("scanning files: %w", err)
 	}
 
 	// Build a "current" manifest from disk
-	current := NewManifest(cfg.Vault.DeviceID)
+	current := NewManifest(cfg.Seal.DeviceID)
 	for _, f := range files {
 		data, err := os.ReadFile(f.AbsPath)
 		if err != nil {
@@ -291,7 +291,7 @@ func isSessionComplete(relPath string) bool {
 	return strings.HasPrefix(relPath, "projects/") && strings.HasSuffix(relPath, ".jsonl")
 }
 
-// RepairResult describes the outcome of a vault integrity check.
+// RepairResult describes the outcome of a seal store integrity check.
 type RepairResult struct {
 	TotalManifest  int
 	TotalOnDisk    int
@@ -301,13 +301,13 @@ type RepairResult struct {
 	Fixed          int
 }
 
-// Verify checks vault integrity without modifying anything.
+// Verify checks seal store integrity without modifying anything.
 func Verify(cfg *config.Config, identity age.Identity, verbose bool) (*RepairResult, error) {
-	vaultDir := cfg.Vault.VaultDir
-	store := NewObjectStore(vaultDir)
+	sealDir := cfg.Seal.SealDir
+	store := NewObjectStore(sealDir)
 	result := &RepairResult{}
 
-	manifest, err := LoadManifest(vaultDir)
+	manifest, err := LoadManifest(sealDir)
 	if err != nil {
 		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
@@ -372,18 +372,18 @@ func Verify(cfg *config.Config, identity age.Identity, verbose bool) (*RepairRes
 	return result, nil
 }
 
-// Repair fixes vault integrity issues.
+// Repair fixes seal store integrity issues.
 func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbose bool) (*RepairResult, error) {
 	result, err := Verify(cfg, identity, verbose)
 	if err != nil {
 		return nil, err
 	}
 
-	store := NewObjectStore(cfg.Vault.VaultDir)
+	store := NewObjectStore(cfg.Seal.SealDir)
 
 	// Try to fix missing/corrupt by re-sealing from plaintext
 	for _, path := range append(result.MissingObjects, result.CorruptObjects...) {
-		absPath := filepath.Join(cfg.Vault.ClaudeDir, path)
+		absPath := filepath.Join(cfg.Seal.ClaudeDir, path)
 		plaintext, err := os.ReadFile(absPath)
 		if err != nil {
 			continue // plaintext not available
@@ -416,12 +416,12 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 	return result, nil
 }
 
-// Rotate re-encrypts all vault objects with a new key.
+// Rotate re-encrypts all sealed objects with a new key.
 func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recipient, verbose bool, progress ProgressFunc) (int, error) {
-	vaultDir := cfg.Vault.VaultDir
-	store := NewObjectStore(vaultDir)
+	sealDir := cfg.Seal.SealDir
+	store := NewObjectStore(sealDir)
 
-	manifest, err := LoadManifest(vaultDir)
+	manifest, err := LoadManifest(sealDir)
 	if err != nil {
 		return 0, fmt.Errorf("loading manifest: %w", err)
 	}
@@ -472,7 +472,7 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 	}
 
 	// Save manifest (updates SealedAt timestamp)
-	if err := manifest.Save(vaultDir); err != nil {
+	if err := manifest.Save(sealDir); err != nil {
 		return rotated, fmt.Errorf("saving manifest: %w", err)
 	}
 

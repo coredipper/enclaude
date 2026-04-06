@@ -5,11 +5,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/coredipper/claude-vault/internal/config"
-	"github.com/coredipper/claude-vault/internal/crypto"
-	"github.com/coredipper/claude-vault/internal/gitops"
-	"github.com/coredipper/claude-vault/internal/session"
-	"github.com/coredipper/claude-vault/internal/vault"
+	"github.com/coredipper/claude-seal/internal/config"
+	"github.com/coredipper/claude-seal/internal/crypto"
+	"github.com/coredipper/claude-seal/internal/gitops"
+	"github.com/coredipper/claude-seal/internal/session"
+	"github.com/coredipper/claude-seal/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -41,14 +41,14 @@ func runHookHandler(cmd *cobra.Command, args []string) error {
 }
 
 func handleSessionStart() error {
-	vaultDir := getVaultDir()
+	sealDir := getSealDir()
 
-	// Check vault exists
-	if _, err := os.Stat(vaultDir + "/vault.toml"); os.IsNotExist(err) {
-		return nil // vault not initialized, skip silently
+	// Check seal store exists
+	if _, err := os.Stat(sealDir + "/seal.toml"); os.IsNotExist(err) {
+		return nil // seal store not initialized, skip silently
 	}
 
-	cfg, err := config.Load(vaultDir)
+	cfg, err := config.Load(sealDir)
 	if err != nil {
 		logHook("error loading config: %v", err)
 		return nil // don't block Claude Code
@@ -59,7 +59,7 @@ func handleSessionStart() error {
 	}
 
 	// Acquire lock with short timeout — don't block Claude startup
-	lock := session.NewVaultLock(vaultDir)
+	lock := session.NewSealLock(sealDir)
 	acquired, err := lock.Acquire(lockTimeout)
 	if err != nil || !acquired {
 		logHook("could not acquire lock, skipping session-start hook")
@@ -69,7 +69,7 @@ func handleSessionStart() error {
 
 	// Pull if auto-pull enabled and remote configured
 	if cfg.Sync.AutoPull {
-		git := gitops.New(vaultDir)
+		git := gitops.New(sealDir)
 		if git.HasRemote("origin") {
 			branch, _ := git.CurrentBranch()
 			if out, err := git.Pull("origin", branch); err != nil {
@@ -86,7 +86,7 @@ func handleSessionStart() error {
 		return nil
 	}
 
-	_, err = vault.Unseal(cfg, identity, false, nil)
+	_, err = store.Unseal(cfg, identity, false, nil)
 	if err != nil {
 		logHook("unseal error: %v", err)
 	}
@@ -95,13 +95,13 @@ func handleSessionStart() error {
 }
 
 func handleSessionEnd() error {
-	vaultDir := getVaultDir()
+	sealDir := getSealDir()
 
-	if _, err := os.Stat(vaultDir + "/vault.toml"); os.IsNotExist(err) {
+	if _, err := os.Stat(sealDir + "/seal.toml"); os.IsNotExist(err) {
 		return nil
 	}
 
-	cfg, err := config.Load(vaultDir)
+	cfg, err := config.Load(sealDir)
 	if err != nil {
 		logHook("error loading config: %v", err)
 		return nil
@@ -112,7 +112,7 @@ func handleSessionEnd() error {
 	}
 
 	// Acquire lock
-	lock := session.NewVaultLock(vaultDir)
+	lock := session.NewSealLock(sealDir)
 	acquired, err := lock.Acquire(lockTimeout)
 	if err != nil || !acquired {
 		logHook("could not acquire lock, skipping session-end hook")
@@ -127,7 +127,7 @@ func handleSessionEnd() error {
 		return nil
 	}
 
-	stats, err := vault.Seal(cfg, recipient, false, nil)
+	stats, err := store.Seal(cfg, recipient, false, nil)
 	if err != nil {
 		logHook("seal error: %v", err)
 		return nil
@@ -135,10 +135,10 @@ func handleSessionEnd() error {
 
 	// Commit if changes
 	if stats.Added > 0 || stats.Modified > 0 {
-		git := gitops.New(vaultDir)
+		git := gitops.New(sealDir)
 		git.AddAll()
-		msg := fmt.Sprintf("vault: auto-seal from %s (%d new, %d modified)",
-			cfg.Vault.DeviceID, stats.Added, stats.Modified)
+		msg := fmt.Sprintf("seal: auto-seal from %s (%d new, %d modified)",
+			cfg.Seal.DeviceID, stats.Added, stats.Modified)
 		git.Commit(msg)
 
 		// Push if auto-push enabled
@@ -155,5 +155,5 @@ func handleSessionEnd() error {
 
 // logHook writes to stderr — Claude Code captures hook stderr for verbose mode.
 func logHook(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "[claude-vault] "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "[claude-seal] "+format+"\n", args...)
 }

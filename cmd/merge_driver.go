@@ -6,10 +6,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/coredipper/claude-vault/internal/config"
-	"github.com/coredipper/claude-vault/internal/crypto"
-	"github.com/coredipper/claude-vault/internal/merge"
-	"github.com/coredipper/claude-vault/internal/vault"
+	"github.com/coredipper/claude-seal/internal/config"
+	"github.com/coredipper/claude-seal/internal/crypto"
+	"github.com/coredipper/claude-seal/internal/merge"
+	sealstore "github.com/coredipper/claude-seal/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -40,9 +40,9 @@ func runMergeDriver(cmd *cobra.Command, args []string) error {
 
 // mergeManifests resolves a manifest.json conflict by merging per-file.
 func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
-	vaultDir := getVaultDir()
+	sealDir := getSealDir()
 
-	cfg, err := config.Load(vaultDir)
+	cfg, err := config.Load(sealDir)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
@@ -63,7 +63,7 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 		return fmt.Errorf("reading theirs: %w", err)
 	}
 
-	var ancestor, ours, theirs vault.Manifest
+	var ancestor, ours, theirs sealstore.Manifest
 	if len(ancestorData) > 0 {
 		json.Unmarshal(ancestorData, &ancestor)
 	}
@@ -74,12 +74,12 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 		return fmt.Errorf("parsing theirs manifest: %w", err)
 	}
 
-	store := vault.NewObjectStore(vaultDir)
-	merged := vault.Manifest{
+	objStore := sealstore.NewObjectStore(sealDir)
+	merged := sealstore.Manifest{
 		Version:  ours.Version,
 		DeviceID: ours.DeviceID,
 		SealedAt: time.Now().UTC().Format(time.RFC3339),
-		Files:    make(map[string]vault.FileEntry),
+		Files:    make(map[string]sealstore.FileEntry),
 	}
 
 	// Collect all file paths from both sides
@@ -127,12 +127,12 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 		}
 
 		// For strategies that need content, decrypt both versions
-		oursEncrypted, err := store.Read(oursEntry.ContentHash)
+		oursEncrypted, err := objStore.Read(oursEntry.ContentHash)
 		if err != nil {
 			merged.Files[path] = oursEntry
 			continue
 		}
-		theirsEncrypted, err := store.Read(theirsEntry.ContentHash)
+		theirsEncrypted, err := objStore.Read(theirsEntry.ContentHash)
 		if err != nil {
 			merged.Files[path] = oursEntry
 			continue
@@ -152,7 +152,7 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 		// Get ancestor content if available
 		var ancestorPlain []byte
 		if ancestorEntry, ok := ancestor.Files[path]; ok {
-			if ancestorEnc, err := store.Read(ancestorEntry.ContentHash); err == nil {
+			if ancestorEnc, err := objStore.Read(ancestorEntry.ContentHash); err == nil {
 				ancestorPlain, _ = crypto.Decrypt(ancestorEnc, identity)
 			}
 		}
@@ -173,19 +173,19 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 		}
 
 		// Encrypt merged content and store
-		mergedHash := vault.ContentHash(mergedContent)
+		mergedHash := sealstore.ContentHash(mergedContent)
 		mergedEncrypted, err := crypto.Encrypt(mergedContent, identity.Recipient())
 		if err != nil {
 			merged.Files[path] = oursEntry
 			continue
 		}
 
-		if err := store.Write(mergedHash, mergedEncrypted); err != nil {
+		if err := objStore.Write(mergedHash, mergedEncrypted); err != nil {
 			merged.Files[path] = oursEntry
 			continue
 		}
 
-		merged.Files[path] = vault.FileEntry{
+		merged.Files[path] = sealstore.FileEntry{
 			ContentHash:    mergedHash,
 			SizePlaintext:  int64(len(mergedContent)),
 			SizeEncrypted:  int64(len(mergedEncrypted)),
@@ -210,9 +210,9 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 		return fmt.Errorf("writing merged manifest: %w", err)
 	}
 
-	// Also update the actual manifest.json in the vault
-	if err := os.WriteFile(cfg.Vault.VaultDir+"/manifest.json", mergedData, 0600); err != nil {
-		return fmt.Errorf("writing vault manifest: %w", err)
+	// Also update the actual manifest.json in the seal store
+	if err := os.WriteFile(cfg.Seal.SealDir+"/manifest.json", mergedData, 0600); err != nil {
+		return fmt.Errorf("writing seal manifest: %w", err)
 	}
 
 	return nil

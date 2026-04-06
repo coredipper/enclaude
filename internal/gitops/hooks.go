@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 )
 
-const vaultHookCommand = "claude-vault hook-handler"
-const vaultHookMarker = "claude-vault hook-handler"
+const sealHookCommand = "claude-seal hook-handler"
+const sealHookMarker = "claude-seal hook-handler"
 
 // hookEntry matches Claude Code's hook config structure.
 type hookEntry struct {
@@ -23,7 +23,7 @@ type hookDef struct {
 	Async   bool   `json:"async,omitempty"`
 }
 
-// InstallHooks adds claude-vault hooks to settings.json without
+// InstallHooks adds claude-seal hooks to settings.json without
 // disturbing existing hooks.
 func InstallHooks(claudeDir string) error {
 	settingsPath := filepath.Join(claudeDir, "settings.json")
@@ -53,7 +53,7 @@ func InstallHooks(claudeDir string) error {
 		Matcher: "",
 		Hooks: []hookDef{{
 			Type:    "command",
-			Command: vaultHookCommand + " session-start",
+			Command: sealHookCommand + " session-start",
 			Timeout: 30,
 		}},
 	}); err != nil {
@@ -65,7 +65,7 @@ func InstallHooks(claudeDir string) error {
 		Matcher: "",
 		Hooks: []hookDef{{
 			Type:    "command",
-			Command: vaultHookCommand + " session-end",
+			Command: sealHookCommand + " session-end",
 			Timeout: 60,
 			Async:   true,
 		}},
@@ -89,7 +89,7 @@ func InstallHooks(claudeDir string) error {
 	return os.WriteFile(settingsPath, out, 0600)
 }
 
-// RemoveHooks removes claude-vault hooks from settings.json.
+// RemoveHooks removes claude-seal hooks from settings.json.
 func RemoveHooks(claudeDir string) error {
 	settingsPath := filepath.Join(claudeDir, "settings.json")
 
@@ -128,7 +128,7 @@ func RemoveHooks(claudeDir string) error {
 	return os.WriteFile(settingsPath, out, 0600)
 }
 
-// HooksInstalled checks if claude-vault hooks are present in settings.json.
+// HooksInstalled checks if claude-seal hooks are present in settings.json.
 func HooksInstalled(claudeDir string) bool {
 	settingsPath := filepath.Join(claudeDir, "settings.json")
 	data, err := os.ReadFile(settingsPath)
@@ -150,7 +150,7 @@ func HooksInstalled(claudeDir string) bool {
 		return false
 	}
 
-	return hasVaultHook(hooks, "SessionStart") && hasVaultHook(hooks, "SessionEnd")
+	return hasSealHook(hooks, "SessionStart") && hasSealHook(hooks, "SessionEnd")
 }
 
 // addHookEntry appends a hook entry to an event's array, skipping if already present.
@@ -162,7 +162,7 @@ func addHookEntry(hooks map[string]json.RawMessage, event string, entry hookEntr
 		}
 	}
 
-	// Check if vault hook already exists
+	// Check if seal hook already exists
 	for _, e := range entries {
 		for _, h := range e.Hooks {
 			if containsMarker(h.Command) {
@@ -181,7 +181,7 @@ func addHookEntry(hooks map[string]json.RawMessage, event string, entry hookEntr
 	return nil
 }
 
-// removeHookEntries removes vault hook entries from an event's array.
+// removeHookEntries removes seal hook entries from an event's array.
 func removeHookEntries(hooks map[string]json.RawMessage, event string) {
 	raw, ok := hooks[event]
 	if !ok {
@@ -195,14 +195,14 @@ func removeHookEntries(hooks map[string]json.RawMessage, event string) {
 
 	var filtered []hookEntry
 	for _, e := range entries {
-		isVault := false
+		isSeal := false
 		for _, h := range e.Hooks {
 			if containsMarker(h.Command) {
-				isVault = true
+				isSeal = true
 				break
 			}
 		}
-		if !isVault {
+		if !isSeal {
 			filtered = append(filtered, e)
 		}
 	}
@@ -218,7 +218,7 @@ func removeHookEntries(hooks map[string]json.RawMessage, event string) {
 	}
 }
 
-func hasVaultHook(hooks map[string]json.RawMessage, event string) bool {
+func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
 	raw, ok := hooks[event]
 	if !ok {
 		return false
@@ -238,5 +238,5 @@ func hasVaultHook(hooks map[string]json.RawMessage, event string) bool {
 }
 
 func containsMarker(cmd string) bool {
-	return len(cmd) >= len(vaultHookMarker) && cmd[:len(vaultHookMarker)] == vaultHookMarker
+	return len(cmd) >= len(sealHookMarker) && cmd[:len(sealHookMarker)] == sealHookMarker
 }

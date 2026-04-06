@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/coredipper/claude-vault/internal/gitops"
-	"github.com/coredipper/claude-vault/internal/ui"
+	"github.com/coredipper/claude-seal/internal/gitops"
+	"github.com/coredipper/claude-seal/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -13,9 +13,9 @@ var logCount int
 
 var logCmd = &cobra.Command{
 	Use:   "log",
-	Short: "Show vault history",
+	Short: "Show seal history",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		git := gitops.New(getVaultDir())
+		git := gitops.New(getSealDir())
 		out, err := git.LogFull(logCount)
 		if err != nil {
 			return fmt.Errorf("git log: %w", err)

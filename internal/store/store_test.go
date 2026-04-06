@@ -1,20 +1,20 @@
-package vault
+package store
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/coredipper/claude-vault/internal/config"
-	"github.com/coredipper/claude-vault/internal/crypto"
+	"github.com/coredipper/claude-seal/internal/config"
+	"github.com/coredipper/claude-seal/internal/crypto"
 )
 
 func TestSealUnsealRoundTrip(t *testing.T) {
 	// Create source directory (simulated ~/.claude/)
 	claudeDir := setupTestDir(t)
 
-	// Create vault directory
-	vaultDir := t.TempDir()
+	// Create seal directory
+	sealDir := t.TempDir()
 
 	// Generate key
 	identity, err := crypto.GenerateKey()
@@ -22,7 +22,7 @@ func TestSealUnsealRoundTrip(t *testing.T) {
 		t.Fatalf("GenerateKey() error: %v", err)
 	}
 
-	cfg := config.DefaultConfig(claudeDir, vaultDir)
+	cfg := config.DefaultConfig(claudeDir, sealDir)
 
 	// Seal
 	sealStats, err := Seal(cfg, identity.Recipient(), false, nil)
@@ -39,7 +39,7 @@ func TestSealUnsealRoundTrip(t *testing.T) {
 	t.Logf("Seal: %s", sealStats)
 
 	// Verify manifest exists
-	manifest, err := LoadManifest(vaultDir)
+	manifest, err := LoadManifest(sealDir)
 	if err != nil {
 		t.Fatalf("LoadManifest() error: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestSealUnsealRoundTrip(t *testing.T) {
 	}
 
 	// Verify objects exist
-	store := NewObjectStore(vaultDir)
+	store := NewObjectStore(sealDir)
 	for path, entry := range manifest.Files {
 		if !store.Exists(entry.ContentHash) {
 			t.Errorf("object missing for %s (hash: %s)", path, entry.ContentHash)
@@ -60,7 +60,7 @@ func TestSealUnsealRoundTrip(t *testing.T) {
 
 	// Unseal to a different directory
 	restoreDir := t.TempDir()
-	cfg2 := config.DefaultConfig(restoreDir, vaultDir)
+	cfg2 := config.DefaultConfig(restoreDir, sealDir)
 
 	unsealStats, err := Unseal(cfg2, identity, false, nil)
 	if err != nil {
@@ -99,10 +99,10 @@ func TestSealUnsealRoundTrip(t *testing.T) {
 
 func TestSealIdempotent(t *testing.T) {
 	claudeDir := setupTestDir(t)
-	vaultDir := t.TempDir()
+	sealDir := t.TempDir()
 
 	identity, _ := crypto.GenerateKey()
-	cfg := config.DefaultConfig(claudeDir, vaultDir)
+	cfg := config.DefaultConfig(claudeDir, sealDir)
 
 	// First seal
 	stats1, err := Seal(cfg, identity.Recipient(), false, nil)
@@ -129,10 +129,10 @@ func TestSealIdempotent(t *testing.T) {
 
 func TestSealIncrementalDetectsChanges(t *testing.T) {
 	claudeDir := setupTestDir(t)
-	vaultDir := t.TempDir()
+	sealDir := t.TempDir()
 
 	identity, _ := crypto.GenerateKey()
-	cfg := config.DefaultConfig(claudeDir, vaultDir)
+	cfg := config.DefaultConfig(claudeDir, sealDir)
 
 	// Initial seal
 	Seal(cfg, identity.Recipient(), false, nil)
@@ -210,8 +210,8 @@ func TestContentHash(t *testing.T) {
 }
 
 func TestObjectStoreWriteReadExists(t *testing.T) {
-	vaultDir := t.TempDir()
-	store := NewObjectStore(vaultDir)
+	sealDir := t.TempDir()
+	store := NewObjectStore(sealDir)
 	store.Init()
 
 	data := []byte("encrypted data here")

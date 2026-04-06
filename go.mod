@@ -1,4 +1,4 @@
-module github.com/coredipper/claude-vault
+module github.com/coredipper/claude-seal
 
 go 1.26.1
 

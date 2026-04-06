@@ -10,16 +10,16 @@ import (
 )
 
 type Config struct {
-	Vault    VaultSection    `toml:"vault"`
+	Seal    SealSection    `toml:"seal"`
 	Sync     SyncSection     `toml:"sync"`
 	Include  PatternSection  `toml:"include"`
 	Exclude  PatternSection  `toml:"exclude"`
 	Merge    map[string]string `toml:"merge_strategies"`
 }
 
-type VaultSection struct {
+type SealSection struct {
 	ClaudeDir string `toml:"claude_dir"`
-	VaultDir  string `toml:"vault_dir"`
+	SealDir  string `toml:"seal_dir"`
 	DeviceID  string `toml:"device_id"`
 }
 
@@ -34,11 +34,11 @@ type PatternSection struct {
 	Patterns []string `toml:"patterns"`
 }
 
-func DefaultConfig(claudeDir, vaultDir string) *Config {
+func DefaultConfig(claudeDir, sealDir string) *Config {
 	return &Config{
-		Vault: VaultSection{
+		Seal: SealSection{
 			ClaudeDir: claudeDir,
-			VaultDir:  vaultDir,
+			SealDir:  sealDir,
 			DeviceID:  generateDeviceID(),
 		},
 		Sync: SyncSection{
@@ -98,23 +98,23 @@ func DefaultConfig(claudeDir, vaultDir string) *Config {
 	}
 }
 
-func Load(vaultDir string) (*Config, error) {
-	path := filepath.Join(vaultDir, "vault.toml")
+func Load(sealDir string) (*Config, error) {
+	path := filepath.Join(sealDir, "seal.toml")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading vault.toml: %w", err)
+		return nil, fmt.Errorf("reading seal.toml: %w", err)
 	}
 
 	var cfg Config
 	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing vault.toml: %w", err)
+		return nil, fmt.Errorf("parsing seal.toml: %w", err)
 	}
 
 	return &cfg, nil
 }
 
-func (c *Config) Save(vaultDir string) error {
-	path := filepath.Join(vaultDir, "vault.toml")
+func (c *Config) Save(sealDir string) error {
+	path := filepath.Join(sealDir, "seal.toml")
 	data, err := toml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)

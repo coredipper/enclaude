@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	keychainService = "claude-vault"
+	keychainService = "claude-seal"
 	keychainAccount = "age-private-key"
 	envKeyVar       = "CLAUDE_VAULT_KEY"
 )

@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/coredipper/claude-vault/internal/config"
-	"github.com/coredipper/claude-vault/internal/crypto"
-	"github.com/coredipper/claude-vault/internal/gitops"
-	"github.com/coredipper/claude-vault/internal/ui"
-	"github.com/coredipper/claude-vault/internal/vault"
+	"github.com/coredipper/claude-seal/internal/config"
+	"github.com/coredipper/claude-seal/internal/crypto"
+	"github.com/coredipper/claude-seal/internal/gitops"
+	"github.com/coredipper/claude-seal/internal/ui"
+	"github.com/coredipper/claude-seal/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +22,7 @@ var keyCmd = &cobra.Command{
 
 var keyShowCmd = &cobra.Command{
 	Use:   "show",
-	Short: "Show the vault's public key",
+	Short: "Show the seal store's public key",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		recipient, source, err := crypto.LoadPublicKey()
 		if err != nil {
@@ -42,7 +42,7 @@ var keyExportCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("loading key: %w", err)
 		}
-		fmt.Printf("# claude-vault private key (loaded from %s)\n", source)
+		fmt.Printf("# claude-seal private key (loaded from %s)\n", source)
 		fmt.Printf("# public key: %s\n", identity.Recipient().String())
 		fmt.Println(identity.String())
 		return nil
@@ -56,15 +56,15 @@ var keyImportCmd = &cobra.Command{
 	Short: "Import a private key from file, stdin, or backup",
 	Long: `Import an age private key into the OS keychain.
 
-  claude-vault key import keyfile.txt    # from file
-  echo "AGE-SECRET-KEY-..." | claude-vault key import -  # from stdin
-  claude-vault key import --from-backup  # decrypt key.age.backup`,
+  claude-seal key import keyfile.txt    # from file
+  echo "AGE-SECRET-KEY-..." | claude-seal key import -  # from stdin
+  claude-seal key import --from-backup  # decrypt key.age.backup`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var keyData string
 
 		if importFromBackup {
-			backupPath := filepath.Join(getVaultDir(), "key.age.backup")
+			backupPath := filepath.Join(getSealDir(), "key.age.backup")
 			encrypted, err := os.ReadFile(backupPath)
 			if err != nil {
 				return fmt.Errorf("reading key backup: %w", err)
@@ -113,11 +113,11 @@ var keyImportCmd = &cobra.Command{
 
 var keyRotateCmd = &cobra.Command{
 	Use:   "rotate",
-	Short: "Generate a new key and re-encrypt all vault objects",
+	Short: "Generate a new key and re-encrypt all sealed objects",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		vaultDir := getVaultDir()
+		sealDir := getSealDir()
 
-		cfg, err := config.Load(vaultDir)
+		cfg, err := config.Load(sealDir)
 		if err != nil {
 			return err
 		}
@@ -136,7 +136,7 @@ var keyRotateCmd = &cobra.Command{
 		newPub := newIdentity.Recipient().String()
 
 		fmt.Println("Re-encrypting all objects...")
-		rotated, err := vault.Rotate(cfg, oldIdentity, newIdentity.Recipient(), flagVerbose, nil)
+		rotated, err := store.Rotate(cfg, oldIdentity, newIdentity.Recipient(), flagVerbose, nil)
 		if err != nil {
 			return fmt.Errorf("rotation: %w", err)
 		}
@@ -157,14 +157,14 @@ var keyRotateCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("creating backup: %w", err)
 			}
-			os.WriteFile(filepath.Join(vaultDir, "key.age.backup"), backup, 0600)
+			os.WriteFile(filepath.Join(sealDir, "key.age.backup"), backup, 0600)
 			fmt.Println("  Key backup updated.")
 		}
 
 		// Commit
-		git := gitops.New(vaultDir)
+		git := gitops.New(sealDir)
 		git.AddAll()
-		git.Commit(fmt.Sprintf("vault: key rotation from %s", cfg.Vault.DeviceID))
+		git.Commit(fmt.Sprintf("seal: key rotation from %s", cfg.Seal.DeviceID))
 
 		fmt.Printf("\n%s Key rotated.\n", ui.Green("Done."))
 		fmt.Printf("  Old public key: %s\n", ui.Faint(oldPub))

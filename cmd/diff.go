@@ -5,19 +5,19 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/coredipper/claude-vault/internal/config"
-	"github.com/coredipper/claude-vault/internal/crypto"
-	"github.com/coredipper/claude-vault/internal/gitops"
-	"github.com/coredipper/claude-vault/internal/ui"
-	"github.com/coredipper/claude-vault/internal/vault"
+	"github.com/coredipper/claude-seal/internal/config"
+	"github.com/coredipper/claude-seal/internal/crypto"
+	"github.com/coredipper/claude-seal/internal/gitops"
+	"github.com/coredipper/claude-seal/internal/ui"
+	sealstore "github.com/coredipper/claude-seal/internal/store"
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"github.com/spf13/cobra"
 )
 
 var diffCmd = &cobra.Command{
 	Use:   "diff [ref]",
-	Short: "Show plaintext diff between vault states",
-	Long:  "Decrypts and diffs vault contents between the current state and a previous commit.",
+	Short: "Show plaintext diff between seal states",
+	Long:  "Decrypts and diffs seal contents between the current state and a previous commit.",
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runDiff,
 }
@@ -27,13 +27,13 @@ func init() {
 }
 
 func runDiff(cmd *cobra.Command, args []string) error {
-	vaultDir := getVaultDir()
+	sealDir := getSealDir()
 	ref := "HEAD~1"
 	if len(args) > 0 {
 		ref = args[0]
 	}
 
-	cfg, err := config.Load(vaultDir)
+	cfg, err := config.Load(sealDir)
 	if err != nil {
 		return err
 	}
@@ -43,11 +43,11 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	git := gitops.New(vaultDir)
-	store := vault.NewObjectStore(vaultDir)
+	git := gitops.New(sealDir)
+	store := sealstore.NewObjectStore(sealDir)
 
 	// Load current manifest
-	currentManifest, err := vault.LoadManifest(vaultDir)
+	currentManifest, err := sealstore.LoadManifest(sealDir)
 	if err != nil {
 		return fmt.Errorf("loading current manifest: %w", err)
 	}
@@ -61,19 +61,19 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot read manifest at %s: %w", ref, err)
 	}
 
-	var oldManifest vault.Manifest
+	var oldManifest sealstore.Manifest
 	if err := json.Unmarshal([]byte(oldManifestJSON), &oldManifest); err != nil {
 		return fmt.Errorf("parsing manifest at %s: %w", ref, err)
 	}
 	if oldManifest.Files == nil {
-		oldManifest.Files = make(map[string]vault.FileEntry)
+		oldManifest.Files = make(map[string]sealstore.FileEntry)
 	}
 
 	// Diff manifests
 	diff := currentManifest.Diff(&oldManifest)
 
 	if len(diff.Added) == 0 && len(diff.Modified) == 0 && len(diff.Deleted) == 0 {
-		fmt.Printf("No changes between %s and current vault.\n", ref)
+		fmt.Printf("No changes between %s and current seal store.\n", ref)
 		return nil
 	}
 
@@ -82,7 +82,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	// Show added files
 	for _, path := range diff.Added {
 		entry := currentManifest.Files[path]
-		fmt.Printf("%s %s %s\n", ui.Green("+++ new"), path, ui.Faint(fmt.Sprintf("(%s)", vault.FormatSize(entry.SizePlaintext))))
+		fmt.Printf("%s %s %s\n", ui.Green("+++ new"), path, ui.Faint(fmt.Sprintf("(%s)", sealstore.FormatSize(entry.SizePlaintext))))
 	}
 
 	// Show deleted files

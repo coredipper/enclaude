@@ -1,4 +1,4 @@
-package vault
+package store
 
 import (
 	"crypto/sha256"
@@ -14,8 +14,8 @@ type ObjectStore struct {
 }
 
 // NewObjectStore creates an ObjectStore rooted at the given directory.
-func NewObjectStore(vaultDir string) *ObjectStore {
-	return &ObjectStore{dir: filepath.Join(vaultDir, "objects")}
+func NewObjectStore(sealDir string) *ObjectStore {
+	return &ObjectStore{dir: filepath.Join(sealDir, "objects")}
 }
 
 // ContentHash computes the SHA-256 hash of plaintext content.

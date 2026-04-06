@@ -1,18 +1,18 @@
-# claude-vault
+# claude-seal
 
 Encrypted, git-backed, cross-device sync for `~/.claude/`.
 
-Claude Code stores conversation history, tool results, and session data as unencrypted plaintext in `~/.claude/`. `claude-vault` encrypts this data with [age](https://age-encryption.org/), stores it in a git repository, and syncs it across devices with JSONL-aware merge.
+Claude Code stores conversation history, tool results, and session data as unencrypted plaintext in `~/.claude/`. `claude-seal` encrypts this data with [age](https://age-encryption.org/), stores it in a git repository, and syncs it across devices with JSONL-aware merge.
 
 ## Quick Start
 
 ```bash
-go install github.com/coredipper/claude-vault@latest
+go install github.com/coredipper/claude-seal@latest
 
-claude-vault init          # generate key, encrypt ~/.claude/
-claude-vault status        # see what changed
-claude-vault seal          # encrypt changes
-claude-vault unseal        # decrypt to ~/.claude/
+claude-seal init          # generate key, encrypt ~/.claude/
+claude-seal status        # see what changed
+claude-seal seal          # encrypt changes
+claude-seal unseal        # decrypt to ~/.claude/
 ```
 
 ## Architecture
@@ -22,9 +22,9 @@ claude-vault unseal        # decrypt to ~/.claude/
      │
      │  seal (encrypt)
      ▼
-~/.claude-vault/        encrypted git repo
+~/.claude-seal/        encrypted git repo
   manifest.json         file index: path → SHA-256 hash, merge strategy
-  vault.toml            config: include/exclude, device ID
+  seal.toml            config: include/exclude, device ID
   key.age.backup        passphrase-encrypted key backup
   objects/              content-addressed age-encrypted blobs
      │
@@ -41,8 +41,8 @@ Files are content-addressed by SHA-256 of their plaintext. Session JSONL files a
 | Command | Description |
 |---------|-------------|
 | `init` | Generate age keypair, store in OS keychain, initial seal |
-| `seal` | Encrypt changed files, commit to vault |
-| `unseal` | Decrypt vault to `~/.claude/` |
+| `seal` | Encrypt changed files, commit to seal store |
+| `unseal` | Decrypt seal to `~/.claude/` |
 | `status` | Show changes since last seal |
 | `sync` | Seal + pull + push (daily driver) |
 | `push` | Seal + git push |
@@ -51,8 +51,8 @@ Files are content-addressed by SHA-256 of their plaintext. Session JSONL files a
 ### History
 | Command | Description |
 |---------|-------------|
-| `log` | Vault commit history |
-| `diff [ref]` | Plaintext diff between vault states |
+| `log` | Seal store commit history |
+| `diff [ref]` | Plaintext diff between seal states |
 | `rollback <ref>` | Restore to a previous commit (creates safety seal first) |
 
 ### Key Management
@@ -75,19 +75,19 @@ Files are content-addressed by SHA-256 of their plaintext. Session JSONL files a
 
 ```bash
 # Device A
-claude-vault remote add origin git@github.com:you/claude-vault-data.git
-claude-vault push
+claude-seal remote add origin git@github.com:you/claude-seal-data.git
+claude-seal push
 
 # Device B
-claude-vault init --import-key
-claude-vault remote add origin git@github.com:you/claude-vault-data.git
-claude-vault pull
-claude-vault hooks install
+claude-seal init --import-key
+claude-seal remote add origin git@github.com:you/claude-seal-data.git
+claude-seal pull
+claude-seal hooks install
 ```
 
 ## Hook Integration
 
-`claude-vault hooks install` adds hooks to `~/.claude/settings.json` that auto-seal on session end and auto-unseal on session start. Existing hooks (peon-ping, notchi, etc.) are preserved.
+`claude-seal hooks install` adds hooks to `~/.claude/settings.json` that auto-seal on session end and auto-unseal on session start. Existing hooks (peon-ping, notchi, etc.) are preserved.
 
 ## Merge Strategies
 
@@ -100,7 +100,7 @@ claude-vault hooks install
 
 ## Configuration
 
-`~/.claude-vault/vault.toml` controls what gets synced:
+`~/.claude-seal/seal.toml` controls what gets synced:
 
 ```toml
 [include]

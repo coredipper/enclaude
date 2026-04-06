@@ -3,16 +3,16 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/coredipper/claude-vault/internal/config"
-	"github.com/coredipper/claude-vault/internal/ui"
-	"github.com/coredipper/claude-vault/internal/vault"
+	"github.com/coredipper/claude-seal/internal/config"
+	"github.com/coredipper/claude-seal/internal/ui"
+	"github.com/coredipper/claude-seal/internal/store"
 	"github.com/spf13/cobra"
 )
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show what changed since last seal",
-	Long:  "Compare ~/.claude/ against the vault manifest to show pending changes.",
+	Long:  "Compare ~/.claude/ against the seal manifest to show pending changes.",
 	RunE:  runStatus,
 }
 
@@ -21,24 +21,24 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
-	vaultDir := getVaultDir()
+	sealDir := getSealDir()
 
-	cfg, err := config.Load(vaultDir)
+	cfg, err := config.Load(sealDir)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
 	if flagClaudeDir != "" {
-		cfg.Vault.ClaudeDir = flagClaudeDir
+		cfg.Seal.ClaudeDir = flagClaudeDir
 	}
 
-	diff, err := vault.Status(cfg)
+	diff, err := store.Status(cfg)
 	if err != nil {
 		return fmt.Errorf("computing status: %w", err)
 	}
 
 	if len(diff.Added) == 0 && len(diff.Modified) == 0 && len(diff.Deleted) == 0 {
-		fmt.Println("Vault is up to date. No changes since last seal.")
+		fmt.Println("Seal is up to date. No changes since last seal.")
 		return nil
 	}
 
@@ -67,7 +67,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		ui.Green(fmt.Sprintf("%d", len(diff.Added))),
 		ui.Yellow(fmt.Sprintf("%d", len(diff.Modified))),
 		ui.Red(fmt.Sprintf("%d", len(diff.Deleted))))
-	fmt.Println("Run 'claude-vault seal' to encrypt and commit these changes.")
+	fmt.Println("Run 'claude-seal seal' to encrypt and commit these changes.")
 
 	return nil
 }

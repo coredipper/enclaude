@@ -3,16 +3,16 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/coredipper/claude-vault/internal/config"
-	"github.com/coredipper/claude-vault/internal/crypto"
-	"github.com/coredipper/claude-vault/internal/vault"
+	"github.com/coredipper/claude-seal/internal/config"
+	"github.com/coredipper/claude-seal/internal/crypto"
+	"github.com/coredipper/claude-seal/internal/store"
 	"github.com/spf13/cobra"
 )
 
 var unsealCmd = &cobra.Command{
 	Use:   "unseal",
-	Short: "Decrypt vault contents to ~/.claude/",
-	Long:  "Decrypt all vault objects and restore them to the Claude directory.",
+	Short: "Decrypt seal contents to ~/.claude/",
+	Long:  "Decrypt all sealed objects and restore them to the Claude directory.",
 	RunE:  runUnseal,
 }
 
@@ -21,15 +21,15 @@ func init() {
 }
 
 func runUnseal(cmd *cobra.Command, args []string) error {
-	vaultDir := getVaultDir()
+	sealDir := getSealDir()
 
-	cfg, err := config.Load(vaultDir)
+	cfg, err := config.Load(sealDir)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
 	if flagClaudeDir != "" {
-		cfg.Vault.ClaudeDir = flagClaudeDir
+		cfg.Seal.ClaudeDir = flagClaudeDir
 	}
 
 	identity, source, err := crypto.LoadKey()
@@ -45,7 +45,7 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Unsealing...")
-	stats, err := vault.Unseal(cfg, identity, flagVerbose, nil)
+	stats, err := store.Unseal(cfg, identity, flagVerbose, nil)
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}

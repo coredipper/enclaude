@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/coredipper/claude-vault/internal/gitops"
+	"github.com/coredipper/claude-seal/internal/gitops"
 	"github.com/spf13/cobra"
 )
 
@@ -17,8 +17,8 @@ var remoteAddCmd = &cobra.Command{
 	Short: "Add a git remote",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		vaultDir := getVaultDir()
-		git := gitops.New(vaultDir)
+		sealDir := getSealDir()
+		git := gitops.New(sealDir)
 
 		name, url := args[0], args[1]
 		if err := git.RemoteAdd(name, url); err != nil {
@@ -26,13 +26,13 @@ var remoteAddCmd = &cobra.Command{
 		}
 
 		// Register merge driver
-		driverCmd := "claude-vault merge-driver manifest %O %A %B"
-		if err := git.ConfigMergeDriver("claude-vault-manifest", driverCmd); err != nil {
+		driverCmd := "claude-seal merge-driver manifest %O %A %B"
+		if err := git.ConfigMergeDriver("claude-seal-manifest", driverCmd); err != nil {
 			fmt.Printf("Warning: could not register merge driver: %v\n", err)
 		}
 
 		fmt.Printf("Remote '%s' added: %s\n", name, url)
-		fmt.Println("Run 'claude-vault push' to sync.")
+		fmt.Println("Run 'claude-seal push' to sync.")
 		return nil
 	},
 }
@@ -41,14 +41,14 @@ var remoteListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List configured remotes",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		git := gitops.New(getVaultDir())
+		git := gitops.New(getSealDir())
 		out, err := git.RemoteList()
 		if err != nil {
 			return err
 		}
 		if out == "" {
 			fmt.Println("No remotes configured.")
-			fmt.Println("Run 'claude-vault remote add origin <url>' to set up sync.")
+			fmt.Println("Run 'claude-seal remote add origin <url>' to set up sync.")
 		} else {
 			fmt.Println(out)
 		}

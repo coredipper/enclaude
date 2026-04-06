@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/coredipper/claude-vault/internal/config"
-	"github.com/coredipper/claude-vault/internal/crypto"
-	"github.com/coredipper/claude-vault/internal/ui"
-	"github.com/coredipper/claude-vault/internal/vault"
+	"github.com/coredipper/claude-seal/internal/config"
+	"github.com/coredipper/claude-seal/internal/crypto"
+	"github.com/coredipper/claude-seal/internal/ui"
+	"github.com/coredipper/claude-seal/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -18,8 +18,8 @@ var (
 
 var repairCmd = &cobra.Command{
 	Use:   "repair",
-	Short: "Verify vault integrity and fix issues",
-	Long: `Checks vault integrity: missing objects, corrupt objects, and orphan files.
+	Short: "Verify seal store integrity and fix issues",
+	Long: `Checks seal store integrity: missing objects, corrupt objects, and orphan files.
 Use --check for verify-only mode (exit code 1 if issues found).
 Use --delete-orphans to remove unreferenced object files.`,
 	RunE: runRepair,
@@ -32,14 +32,14 @@ func init() {
 }
 
 func runRepair(cmd *cobra.Command, args []string) error {
-	vaultDir := getVaultDir()
+	sealDir := getSealDir()
 
-	cfg, err := config.Load(vaultDir)
+	cfg, err := config.Load(sealDir)
 	if err != nil {
 		return err
 	}
 	if flagClaudeDir != "" {
-		cfg.Vault.ClaudeDir = flagClaudeDir
+		cfg.Seal.ClaudeDir = flagClaudeDir
 	}
 
 	identity, _, err := crypto.LoadKey()
@@ -48,8 +48,8 @@ func runRepair(cmd *cobra.Command, args []string) error {
 	}
 
 	if repairCheck {
-		fmt.Println("Verifying vault integrity...")
-		result, err := vault.Verify(cfg, identity, flagVerbose)
+		fmt.Println("Verifying seal store integrity...")
+		result, err := store.Verify(cfg, identity, flagVerbose)
 		if err != nil {
 			return err
 		}
@@ -60,8 +60,8 @@ func runRepair(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Println("Repairing vault...")
-	result, err := vault.Repair(cfg, identity, repairDeleteOrphans, flagVerbose)
+	fmt.Println("Repairing seal store...")
+	result, err := store.Repair(cfg, identity, repairDeleteOrphans, flagVerbose)
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func runRepair(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printRepairResult(r *vault.RepairResult) {
+func printRepairResult(r *store.RepairResult) {
 	fmt.Printf("\nManifest entries: %d\n", r.TotalManifest)
 	fmt.Printf("Objects on disk:  %d\n", r.TotalOnDisk)
 
@@ -100,6 +100,6 @@ func printRepairResult(r *vault.RepairResult) {
 	}
 
 	if len(r.MissingObjects) == 0 && len(r.CorruptObjects) == 0 && len(r.OrphanObjects) == 0 {
-		fmt.Printf("\n%s Vault integrity verified. No issues found.\n", ui.Green("OK"))
+		fmt.Printf("\n%s Seal integrity verified. No issues found.\n", ui.Green("OK"))
 	}
 }

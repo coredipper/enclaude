@@ -1,4 +1,4 @@
-package vault
+package store
 
 import (
 	"encoding/json"
@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Manifest tracks all files in the vault with their content hashes and metadata.
+// Manifest tracks all files in the seal store with their content hashes and metadata.
 type Manifest struct {
 	Version  int                    `json:"version"`
 	DeviceID string                 `json:"device_id"`
@@ -16,7 +16,7 @@ type Manifest struct {
 	Files    map[string]FileEntry   `json:"files"`
 }
 
-// FileEntry describes a single file in the vault.
+// FileEntry describes a single file in the seal store.
 type FileEntry struct {
 	ContentHash   string `json:"content_hash"`
 	SizePlaintext int64  `json:"size_plaintext"`
@@ -40,8 +40,8 @@ func NewManifest(deviceID string) *Manifest {
 }
 
 // Load reads a manifest from disk.
-func LoadManifest(vaultDir string) (*Manifest, error) {
-	path := filepath.Join(vaultDir, "manifest.json")
+func LoadManifest(sealDir string) (*Manifest, error) {
+	path := filepath.Join(sealDir, "manifest.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -61,13 +61,13 @@ func LoadManifest(vaultDir string) (*Manifest, error) {
 }
 
 // Save writes the manifest to disk.
-func (m *Manifest) Save(vaultDir string) error {
+func (m *Manifest) Save(sealDir string) error {
 	m.SealedAt = time.Now().UTC().Format(time.RFC3339)
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling manifest: %w", err)
 	}
-	path := filepath.Join(vaultDir, "manifest.json")
+	path := filepath.Join(sealDir, "manifest.json")
 	return os.WriteFile(path, data, 0600)
 }
 

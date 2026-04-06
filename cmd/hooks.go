@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/coredipper/claude-vault/internal/gitops"
+	"github.com/coredipper/claude-seal/internal/gitops"
 	"github.com/spf13/cobra"
 )
 
@@ -20,11 +20,11 @@ var hooksInstallCmd = &cobra.Command{
 		claudeDir := getClaudeDir()
 
 		if gitops.HooksInstalled(claudeDir) {
-			fmt.Println("Vault hooks are already installed.")
+			fmt.Println("Seal hooks are already installed.")
 			return nil
 		}
 
-		fmt.Println("Installing vault hooks into settings.json...")
+		fmt.Println("Installing seal hooks into settings.json...")
 		if err := gitops.InstallHooks(claudeDir); err != nil {
 			return fmt.Errorf("installing hooks: %w", err)
 		}
@@ -38,36 +38,36 @@ var hooksInstallCmd = &cobra.Command{
 
 var hooksRemoveCmd = &cobra.Command{
 	Use:   "remove",
-	Short: "Remove vault hooks from Claude Code settings",
+	Short: "Remove seal hooks from Claude Code settings",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		claudeDir := getClaudeDir()
 
 		if !gitops.HooksInstalled(claudeDir) {
-			fmt.Println("No vault hooks found.")
+			fmt.Println("No seal hooks found.")
 			return nil
 		}
 
-		fmt.Println("Removing vault hooks...")
+		fmt.Println("Removing seal hooks...")
 		if err := gitops.RemoveHooks(claudeDir); err != nil {
 			return fmt.Errorf("removing hooks: %w", err)
 		}
 
-		fmt.Println("Vault hooks removed. Other hooks were preserved.")
+		fmt.Println("Seal hooks removed. Other hooks were preserved.")
 		return nil
 	},
 }
 
 var hooksStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Check if vault hooks are installed",
+	Short: "Check if seal hooks are installed",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		claudeDir := getClaudeDir()
 
 		if gitops.HooksInstalled(claudeDir) {
-			fmt.Println("Vault hooks: installed")
+			fmt.Println("Seal hooks: installed")
 		} else {
-			fmt.Println("Vault hooks: not installed")
-			fmt.Println("Run 'claude-vault hooks install' to enable auto-sync.")
+			fmt.Println("Seal hooks: not installed")
+			fmt.Println("Run 'claude-seal hooks install' to enable auto-sync.")
 		}
 		return nil
 	},

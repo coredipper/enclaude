@@ -4,16 +4,16 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/coredipper/claude-vault/internal/config"
-	"github.com/coredipper/claude-vault/internal/crypto"
-	"github.com/coredipper/claude-vault/internal/vault"
+	"github.com/coredipper/claude-seal/internal/config"
+	"github.com/coredipper/claude-seal/internal/crypto"
+	"github.com/coredipper/claude-seal/internal/store"
 	"github.com/spf13/cobra"
 )
 
 var sealCmd = &cobra.Command{
 	Use:   "seal",
-	Short: "Encrypt changed files into the vault",
-	Long:  "Scan ~/.claude/ for changes, encrypt new/modified files, and commit to vault.",
+	Short: "Encrypt changed files into the seal store",
+	Long:  "Scan ~/.claude/ for changes, encrypt new/modified files, and commit to seal store.",
 	RunE:  runSeal,
 }
 
@@ -22,16 +22,16 @@ func init() {
 }
 
 func runSeal(cmd *cobra.Command, args []string) error {
-	vaultDir := getVaultDir()
+	sealDir := getSealDir()
 
-	cfg, err := config.Load(vaultDir)
+	cfg, err := config.Load(sealDir)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
 	// Override dirs from flags
 	if flagClaudeDir != "" {
-		cfg.Vault.ClaudeDir = flagClaudeDir
+		cfg.Seal.ClaudeDir = flagClaudeDir
 	}
 
 	recipient, source, err := crypto.LoadPublicKey()
@@ -47,7 +47,7 @@ func runSeal(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Sealing...")
-	stats, err := vault.Seal(cfg, recipient, flagVerbose, nil)
+	stats, err := store.Seal(cfg, recipient, flagVerbose, nil)
 	if err != nil {
 		return fmt.Errorf("seal: %w", err)
 	}
@@ -59,14 +59,14 @@ func runSeal(cmd *cobra.Command, args []string) error {
 
 	// Commit if there are changes
 	if stats.Added > 0 || stats.Modified > 0 {
-		gitAdd := exec.Command("git", "-C", vaultDir, "add", ".")
+		gitAdd := exec.Command("git", "-C", sealDir, "add", ".")
 		if err := gitAdd.Run(); err != nil {
 			return fmt.Errorf("git add: %w", err)
 		}
 
-		msg := fmt.Sprintf("vault: seal from %s (%d new, %d modified)",
-			cfg.Vault.DeviceID, stats.Added, stats.Modified)
-		gitCommit := exec.Command("git", "-C", vaultDir, "commit", "-m", msg)
+		msg := fmt.Sprintf("seal: seal from %s (%d new, %d modified)",
+			cfg.Seal.DeviceID, stats.Added, stats.Modified)
+		gitCommit := exec.Command("git", "-C", sealDir, "commit", "-m", msg)
 		if flagVerbose {
 			gitCommit.Stdout = cmd.OutOrStdout()
 			gitCommit.Stderr = cmd.ErrOrStderr()
@@ -74,7 +74,7 @@ func runSeal(cmd *cobra.Command, args []string) error {
 		if err := gitCommit.Run(); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
-		fmt.Println("  Committed to vault.")
+		fmt.Println("  Committed to seal store.")
 	} else {
 		fmt.Println("  No changes to commit.")
 	}

@@ -9,32 +9,32 @@ import (
 	"github.com/gofrs/flock"
 )
 
-// VaultLock provides file-based locking for vault operations.
-type VaultLock struct {
+// SealLock provides file-based locking for seal operations.
+type SealLock struct {
 	flock *flock.Flock
 }
 
-// NewVaultLock creates a lock for the given vault directory.
-func NewVaultLock(vaultDir string) *VaultLock {
-	lockPath := filepath.Join(vaultDir, ".vault.lock")
-	return &VaultLock{
+// NewSealLock creates a lock for the given seal directory.
+func NewSealLock(sealDir string) *SealLock {
+	lockPath := filepath.Join(sealDir, ".seal.lock")
+	return &SealLock{
 		flock: flock.New(lockPath),
 	}
 }
 
 // Acquire tries to acquire the lock with a timeout.
 // Returns true if acquired, false if timed out.
-func (l *VaultLock) Acquire(timeout time.Duration) (bool, error) {
+func (l *SealLock) Acquire(timeout time.Duration) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	locked, err := l.flock.TryLockContext(ctx, 200*time.Millisecond)
 	if err != nil {
-		return false, fmt.Errorf("acquiring vault lock: %w", err)
+		return false, fmt.Errorf("acquiring seal lock: %w", err)
 	}
 	return locked, nil
 }
 
 // Release releases the lock.
-func (l *VaultLock) Release() error {
+func (l *SealLock) Release() error {
 	return l.flock.Unlock()
 }

@@ -1,17 +1,17 @@
-package vault
+package store
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/coredipper/claude-vault/internal/config"
-	"github.com/coredipper/claude-vault/internal/crypto"
+	"github.com/coredipper/claude-seal/internal/config"
+	"github.com/coredipper/claude-seal/internal/crypto"
 )
 
 func TestListAllObjects(t *testing.T) {
-	vaultDir := t.TempDir()
-	store := NewObjectStore(vaultDir)
+	sealDir := t.TempDir()
+	store := NewObjectStore(sealDir)
 	store.Init()
 
 	// Write some objects
@@ -42,12 +42,12 @@ func TestListAllObjects(t *testing.T) {
 	}
 }
 
-func TestVerifyHealthyVault(t *testing.T) {
+func TestVerifyHealthySeal(t *testing.T) {
 	claudeDir := setupTestDir(t)
-	vaultDir := t.TempDir()
+	sealDir := t.TempDir()
 
 	identity, _ := crypto.GenerateKey()
-	cfg := config.DefaultConfig(claudeDir, vaultDir)
+	cfg := config.DefaultConfig(claudeDir, sealDir)
 
 	Seal(cfg, identity.Recipient(), false, nil)
 
@@ -69,16 +69,16 @@ func TestVerifyHealthyVault(t *testing.T) {
 
 func TestVerifyDetectsMissingObject(t *testing.T) {
 	claudeDir := setupTestDir(t)
-	vaultDir := t.TempDir()
+	sealDir := t.TempDir()
 
 	identity, _ := crypto.GenerateKey()
-	cfg := config.DefaultConfig(claudeDir, vaultDir)
+	cfg := config.DefaultConfig(claudeDir, sealDir)
 
 	Seal(cfg, identity.Recipient(), false, nil)
 
 	// Delete one object
-	manifest, _ := LoadManifest(vaultDir)
-	store := NewObjectStore(vaultDir)
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
 	for _, entry := range manifest.Files {
 		os.Remove(store.ObjectPath(entry.ContentHash))
 		break // delete just one
@@ -96,15 +96,15 @@ func TestVerifyDetectsMissingObject(t *testing.T) {
 
 func TestVerifyDetectsOrphan(t *testing.T) {
 	claudeDir := setupTestDir(t)
-	vaultDir := t.TempDir()
+	sealDir := t.TempDir()
 
 	identity, _ := crypto.GenerateKey()
-	cfg := config.DefaultConfig(claudeDir, vaultDir)
+	cfg := config.DefaultConfig(claudeDir, sealDir)
 
 	Seal(cfg, identity.Recipient(), false, nil)
 
 	// Add a fake orphan object
-	store := NewObjectStore(vaultDir)
+	store := NewObjectStore(sealDir)
 	fakeHash := "deadbeef12345678deadbeef12345678deadbeef12345678deadbeef12345678"
 	store.Write(fakeHash, []byte("orphan data"))
 
@@ -120,16 +120,16 @@ func TestVerifyDetectsOrphan(t *testing.T) {
 
 func TestRepairFixesMissing(t *testing.T) {
 	claudeDir := setupTestDir(t)
-	vaultDir := t.TempDir()
+	sealDir := t.TempDir()
 
 	identity, _ := crypto.GenerateKey()
-	cfg := config.DefaultConfig(claudeDir, vaultDir)
+	cfg := config.DefaultConfig(claudeDir, sealDir)
 
 	Seal(cfg, identity.Recipient(), false, nil)
 
 	// Delete one object
-	manifest, _ := LoadManifest(vaultDir)
-	store := NewObjectStore(vaultDir)
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
 	var deletedPath string
 	for path, entry := range manifest.Files {
 		os.Remove(store.ObjectPath(entry.ContentHash))
@@ -148,7 +148,7 @@ func TestRepairFixesMissing(t *testing.T) {
 	}
 
 	// Verify the object exists again
-	manifest2, _ := LoadManifest(vaultDir)
+	manifest2, _ := LoadManifest(sealDir)
 	entry := manifest2.Files[deletedPath]
 	if !store.Exists(entry.ContentHash) {
 		t.Error("object still missing after repair")
@@ -157,10 +157,10 @@ func TestRepairFixesMissing(t *testing.T) {
 
 func TestRotateReEncrypts(t *testing.T) {
 	claudeDir := setupTestDir(t)
-	vaultDir := t.TempDir()
+	sealDir := t.TempDir()
 
 	oldIdentity, _ := crypto.GenerateKey()
-	cfg := config.DefaultConfig(claudeDir, vaultDir)
+	cfg := config.DefaultConfig(claudeDir, sealDir)
 
 	Seal(cfg, oldIdentity.Recipient(), false, nil)
 
@@ -176,8 +176,8 @@ func TestRotateReEncrypts(t *testing.T) {
 	}
 
 	// Verify old key can't decrypt
-	manifest, _ := LoadManifest(vaultDir)
-	store := NewObjectStore(vaultDir)
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
 	for _, entry := range manifest.Files {
 		encrypted, _ := store.Read(entry.ContentHash)
 		_, err := crypto.Decrypt(encrypted, oldIdentity)
@@ -203,7 +203,7 @@ func TestRotateReEncrypts(t *testing.T) {
 
 	// Verify full round-trip: unseal with new key to fresh dir
 	restoreDir := t.TempDir()
-	cfg2 := config.DefaultConfig(restoreDir, vaultDir)
+	cfg2 := config.DefaultConfig(restoreDir, sealDir)
 	stats, err := Unseal(cfg2, newIdentity, false, nil)
 	if err != nil {
 		t.Fatalf("Unseal with new key error: %v", err)

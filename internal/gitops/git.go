@@ -112,7 +112,7 @@ func (g *Git) LogFull(n int) (string, error) {
 
 // ConfigMergeDriver registers a custom merge driver.
 func (g *Git) ConfigMergeDriver(name, driverCmd string) error {
-	if _, err := g.run("config", fmt.Sprintf("merge.%s.name", name), "Claude Vault "+name+" merge"); err != nil {
+	if _, err := g.run("config", fmt.Sprintf("merge.%s.name", name), "Claude Seal "+name+" merge"); err != nil {
 		return err
 	}
 	_, err := g.run("config", fmt.Sprintf("merge.%s.driver", name), driverCmd)

@@ -13,13 +13,13 @@ var (
 	flagVerbose  bool
 	flagDryRun   bool
 	flagClaudeDir string
-	flagVaultDir  string
+	flagSealDir  string
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "claude-vault",
+	Use:   "claude-seal",
 	Short: "Encrypted git-like sync for ~/.claude/",
-	Long: `claude-vault provides age-encrypted, git-backed, JSONL-aware sync
+	Long: `claude-seal provides age-encrypted, git-backed, JSONL-aware sync
 for your Claude Code session data. It encrypts your conversation history,
 settings, and memory at rest and syncs them across devices with version history.`,
 	Version: Version,
@@ -36,7 +36,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false, "show what would happen without doing it")
 	rootCmd.PersistentFlags().StringVar(&flagClaudeDir, "claude-dir", "", "override ~/.claude/ location")
-	rootCmd.PersistentFlags().StringVar(&flagVaultDir, "vault-dir", "", "override ~/.claude-vault/ location")
+	rootCmd.PersistentFlags().StringVar(&flagSealDir, "seal-dir", "", "override ~/.claude-seal/ location")
 }
 
 func getClaudeDir() string {
@@ -51,14 +51,14 @@ func getClaudeDir() string {
 	return home + "/.claude"
 }
 
-func getVaultDir() string {
-	if flagVaultDir != "" {
-		return flagVaultDir
+func getSealDir() string {
+	if flagSealDir != "" {
+		return flagSealDir
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: cannot determine home directory:", err)
 		os.Exit(1)
 	}
-	return home + "/.claude-vault"
+	return home + "/.claude-seal"
 }

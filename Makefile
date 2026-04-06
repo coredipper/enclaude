@@ -1,10 +1,10 @@
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS := -ldflags "-X github.com/bogdandm/claude-vault/cmd.Version=$(VERSION)"
+LDFLAGS := -ldflags "-X github.com/coredipper/claude-seal/cmd.Version=$(VERSION)"
 
 .PHONY: build install test lint clean
 
 build:
-	go build $(LDFLAGS) -o claude-vault .
+	go build $(LDFLAGS) -o claude-seal .
 
 install:
 	go install $(LDFLAGS) .
@@ -19,4 +19,4 @@ lint:
 	golangci-lint run
 
 clean:
-	rm -f claude-vault
+	rm -f claude-seal
