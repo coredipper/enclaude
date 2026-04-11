@@ -34,16 +34,34 @@ func runSeal(cmd *cobra.Command, args []string) error {
 		cfg.Seal.ClaudeDir = flagClaudeDir
 	}
 
+	if flagDryRun {
+		fmt.Println("(dry run — showing what would be sealed)")
+		diff, err := store.Status(cfg)
+		if err != nil {
+			return fmt.Errorf("status: %w", err)
+		}
+		if len(diff.Added) == 0 && len(diff.Modified) == 0 && len(diff.Deleted) == 0 {
+			fmt.Println("  No changes to seal.")
+		} else {
+			for _, p := range diff.Added {
+				fmt.Printf("  [new] %s\n", p)
+			}
+			for _, p := range diff.Modified {
+				fmt.Printf("  [mod] %s\n", p)
+			}
+			for _, p := range diff.Deleted {
+				fmt.Printf("  [del] %s\n", p)
+			}
+		}
+		return nil
+	}
+
 	recipient, source, err := crypto.LoadPublicKey()
 	if err != nil {
 		return fmt.Errorf("loading key: %w", err)
 	}
 	if flagVerbose {
 		fmt.Printf("Using key from %s\n", source)
-	}
-
-	if flagDryRun {
-		fmt.Println("(dry run — no changes will be made)")
 	}
 
 	fmt.Println("Sealing...")
@@ -53,19 +71,20 @@ func runSeal(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  %s\n", stats)
 
-	if flagDryRun {
-		return nil
+	if stats.Errors > 0 {
+		fmt.Printf("  Warning: %d errors encountered. Skipping commit.\n", stats.Errors)
+		return fmt.Errorf("seal had %d errors", stats.Errors)
 	}
 
 	// Commit if there are changes
-	if stats.Added > 0 || stats.Modified > 0 {
+	if stats.HasChanges() {
 		gitAdd := exec.Command("git", "-C", sealDir, "add", ".")
 		if err := gitAdd.Run(); err != nil {
 			return fmt.Errorf("git add: %w", err)
 		}
 
-		msg := fmt.Sprintf("seal: seal from %s (%d new, %d modified)",
-			cfg.Seal.DeviceID, stats.Added, stats.Modified)
+		msg := fmt.Sprintf("seal: seal from %s (%s)",
+			cfg.Seal.DeviceID, stats)
 		gitCommit := exec.Command("git", "-C", sealDir, "commit", "-m", msg)
 		if flagVerbose {
 			gitCommit.Stdout = cmd.OutOrStdout()
@@ -77,10 +96,6 @@ func runSeal(cmd *cobra.Command, args []string) error {
 		fmt.Println("  Committed to seal store.")
 	} else {
 		fmt.Println("  No changes to commit.")
-	}
-
-	if stats.Errors > 0 {
-		fmt.Printf("  Warning: %d errors encountered.\n", stats.Errors)
 	}
 
 	return nil

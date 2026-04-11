@@ -9,10 +9,11 @@ import (
 type Strategy string
 
 const (
-	Immutable    Strategy = "immutable"
-	JSONLDedup   Strategy = "jsonl_dedup"
+	Immutable     Strategy = "immutable"
+	JSONLDedup    Strategy = "jsonl_dedup"
+	SessionsIndex Strategy = "sessions_index"
 	LastWriteWins Strategy = "last_write_wins"
-	TextMerge    Strategy = "text_merge"
+	TextMerge     Strategy = "text_merge"
 )
 
 // FileMeta carries metadata needed for merge decisions.
@@ -29,6 +30,8 @@ func Merge(strategy Strategy, ancestor, ours, theirs []byte, oursMeta, theirsMet
 		return mergeImmutable(ours, theirs)
 	case JSONLDedup:
 		return MergeJSONL(ours, theirs)
+	case SessionsIndex:
+		return MergeSessionsIndex(ours, theirs)
 	case LastWriteWins:
 		return mergeLastWriteWins(ours, theirs, oursMeta, theirsMeta)
 	case TextMerge:

@@ -18,11 +18,21 @@ type SealStats struct {
 	Scanned   int
 	Added     int
 	Modified  int
+	Deleted   int
 	Unchanged int
 	Errors    int
 }
 
+// HasChanges returns true if the seal produced any modifications worth committing.
+func (s SealStats) HasChanges() bool {
+	return s.Added > 0 || s.Modified > 0 || s.Deleted > 0
+}
+
 func (s SealStats) String() string {
+	if s.Deleted > 0 {
+		return fmt.Sprintf("scanned %d files: %d new, %d modified, %d deleted, %d unchanged",
+			s.Scanned, s.Added, s.Modified, s.Deleted, s.Unchanged)
+	}
 	return fmt.Sprintf("scanned %d files: %d new, %d modified, %d unchanged",
 		s.Scanned, s.Added, s.Modified, s.Unchanged)
 }
@@ -32,10 +42,15 @@ type UnsealStats struct {
 	Total     int
 	Restored  int
 	Unchanged int
+	Deleted   int
 	Errors    int
 }
 
 func (s UnsealStats) String() string {
+	if s.Deleted > 0 {
+		return fmt.Sprintf("%d files: %d restored, %d unchanged, %d deleted",
+			s.Total, s.Restored, s.Unchanged, s.Deleted)
+	}
 	return fmt.Sprintf("%d files: %d restored, %d unchanged",
 		s.Total, s.Restored, s.Unchanged)
 }
@@ -140,7 +155,7 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 			SizePlaintext:  f.Size,
 			SizeEncrypted:  int64(len(encrypted)),
 			Mtime:          time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
-			MergeStrategy:  resolveMergeStrategy(f.RelPath, cfg.Merge),
+			MergeStrategy:  ResolveMergeStrategy(f.RelPath, cfg.Merge),
 			JSONLLineCount: lineCount,
 			SessionComplete: isSessionComplete(f.RelPath),
 		}
@@ -153,6 +168,7 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 				fmt.Printf("  [del] %s\n", path)
 			}
 			delete(manifest.Files, path)
+			stats.Deleted++
 		}
 	}
 
@@ -164,7 +180,8 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 	return stats, nil
 }
 
-// Unseal decrypts seal contents back to claudeDir.
+// Unseal decrypts seal contents back to claudeDir and removes managed
+// files not in the manifest. The manifest is the source of truth.
 func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress ProgressFunc) (UnsealStats, error) {
 	var stats UnsealStats
 	sealDir := cfg.Seal.SealDir
@@ -234,8 +251,50 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		stats.Restored++
 	}
 
+	// Delete managed files not in the manifest. The manifest is the source
+	// of truth — after git pull/merge, it reflects the intended state
+	// including remote deletions. Skip if restore had errors (incomplete
+	// unseal should not trigger deletions).
+	if stats.Errors > 0 {
+		return stats, nil
+	}
+	existingFiles, scanErr := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
+	if scanErr != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "  warning: skipping deletion (scan incomplete: %v)\n", scanErr)
+		}
+		stats.Errors++
+		return stats, nil
+	}
+	{
+		manifestPaths := make(map[string]bool, len(manifest.Files))
+		for relPath := range manifest.Files {
+			manifestPaths[relPath] = true
+		}
+		for _, f := range existingFiles {
+			if !manifestPaths[f.RelPath] {
+				if err := os.Remove(f.AbsPath); err == nil {
+					stats.Deleted++
+					if verbose {
+						fmt.Printf("  [delete] %s\n", f.RelPath)
+					}
+					dir := filepath.Dir(f.AbsPath)
+					if dir != cfg.Seal.ClaudeDir {
+						os.Remove(dir)
+					}
+				} else {
+					stats.Errors++
+					if verbose {
+						fmt.Fprintf(os.Stderr, "  warning: cannot delete %s: %v\n", f.RelPath, err)
+					}
+				}
+			}
+		}
+	}
+
 	return stats, nil
 }
+
 
 // Status returns the diff between the current claude directory and the seal manifest.
 func Status(cfg *config.Config) (*DiffResult, error) {
@@ -265,23 +324,132 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 	return &diff, nil
 }
 
-// resolveMergeStrategy finds the merge strategy for a file based on glob patterns.
-func resolveMergeStrategy(relPath string, strategies map[string]string) string {
-	// Try exact match first
-	if s, ok := strategies[relPath]; ok {
-		return s
+// UnsealStatus returns what Unseal would do without actually writing anything.
+// "Added" = files in manifest but missing on disk (would be restored).
+// "Modified" = files on disk with different content than manifest (would be overwritten).
+// "Deleted" = managed files on disk but not in manifest (would be deleted).
+func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
+	manifest, err := LoadManifest(cfg.Seal.SealDir)
+	if err != nil {
+		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
-	// Try glob patterns
-	for pattern, strategy := range strategies {
-		if matchGlob(relPath, pattern) {
-			return strategy
+	if manifest == nil {
+		return nil, fmt.Errorf("no manifest found — is the seal store initialized?")
+	}
+
+	// Scan existing files. If claudeDir doesn't exist yet (first-time
+	// restore), treat as empty — all manifest files would be restored.
+	var files []ScanResult
+	if _, statErr := os.Stat(cfg.Seal.ClaudeDir); statErr == nil {
+		files, err = ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
+		if err != nil {
+			return nil, fmt.Errorf("scanning files: %w", err)
 		}
 	}
+
+	// Build current state from disk
+	onDisk := make(map[string]string) // relPath -> hash
+	for _, f := range files {
+		data, err := os.ReadFile(f.AbsPath)
+		if err != nil {
+			continue
+		}
+		onDisk[f.RelPath] = ContentHash(data)
+	}
+
+	var result DiffResult
+
+	// Files in manifest: would be restored or overwritten
+	for relPath, entry := range manifest.Files {
+		diskHash, exists := onDisk[relPath]
+		if !exists {
+			result.Added = append(result.Added, relPath) // missing on disk, would restore
+		} else if diskHash != entry.ContentHash {
+			result.Modified = append(result.Modified, relPath) // different, would overwrite
+		}
+	}
+
+	// Managed files on disk but not in manifest: would be deleted
+	for relPath := range onDisk {
+		if _, inManifest := manifest.Files[relPath]; !inManifest {
+			result.Deleted = append(result.Deleted, relPath)
+		}
+	}
+
+	return &result, nil
+}
+
+// ResolveMergeStrategy finds the merge strategy for a file based on glob patterns.
+func ResolveMergeStrategy(relPath string, strategies map[string]string) string {
+	strategy, _ := ResolveMergeStrategyWithPattern(relPath, strategies)
+	return strategy
+}
+
+// ResolveMergeStrategyWithPattern returns both the strategy and the pattern that matched.
+// An empty pattern means a built-in default was used.
+// When multiple glob patterns match, the most specific wins (most segments,
+// fewest wildcards). This ensures deterministic resolution regardless of
+// Go map iteration order.
+func ResolveMergeStrategyWithPattern(relPath string, strategies map[string]string) (strategy string, pattern string) {
+	// Try exact match first (highest priority)
+	if s, ok := strategies[relPath]; ok {
+		return s, relPath
+	}
+
+	// Collect all matching glob patterns, pick the most specific
+	bestPattern := ""
+	bestStrategy := ""
+	bestScore := ""
+
+	for p, s := range strategies {
+		if p == relPath {
+			continue // already checked exact match
+		}
+		if MatchGlob(relPath, p) {
+			score := patternSpecificity(p)
+			if score > bestScore {
+				bestScore = score
+				bestPattern = p
+				bestStrategy = s
+			}
+		}
+	}
+
+	if bestPattern != "" {
+		return bestStrategy, bestPattern
+	}
+
 	// Default
 	if strings.HasSuffix(relPath, ".md") {
-		return "text_merge"
+		return "text_merge", ""
 	}
-	return "last_write_wins"
+	return "last_write_wins", ""
+}
+
+// patternSpecificity returns a comparable score slice for a glob pattern.
+// Compared lexicographically, more specific patterns sort higher.
+// Per-segment scoring: literal=3, constrained glob (contains [)=2, *=1, **=0.
+// Ties broken by segment count (more = more specific) then pattern string.
+func patternSpecificity(pattern string) string {
+	segs := strings.Split(pattern, "/")
+	// Sum per-segment scores: literal=3, glob=2, *=1, **=0.
+	// Higher total = more specific.
+	total := 0
+	for _, seg := range segs {
+		switch {
+		case seg == "**":
+			total += 0
+		case seg == "*":
+			total += 1
+		case strings.ContainsAny(seg, "*?["):
+			total += 2
+		default:
+			total += 3
+		}
+	}
+	// Fixed-width: total score (2 digits), segment count (2 digits), pattern.
+	// Higher total wins; ties broken by more segments, then lexical.
+	return fmt.Sprintf("%02d:%02d:%s", total, len(segs), pattern)
 }
 
 // isSessionComplete determines if a session JSONL file is likely complete.
@@ -379,7 +547,17 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 		return nil, err
 	}
 
+	manifest, err := LoadManifest(cfg.Seal.SealDir)
+	if err != nil {
+		return nil, fmt.Errorf("loading manifest: %w", err)
+	}
+
 	store := NewObjectStore(cfg.Seal.SealDir)
+
+	// Track old hashes that get superseded during repair so we can
+	// include them in orphan deletion (they become orphaned only after
+	// the manifest is updated with new hashes).
+	var superseded []string
 
 	// Try to fix missing/corrupt by re-sealing from plaintext
 	for _, path := range append(result.MissingObjects, result.CorruptObjects...) {
@@ -397,15 +575,63 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 		if err := store.Write(hash, encrypted); err != nil {
 			continue
 		}
+
+		// Track superseded hash before updating manifest
+		oldHash := manifest.Files[path].ContentHash
+		if oldHash != hash && oldHash != "" {
+			superseded = append(superseded, oldHash)
+		}
+
+		// Rebuild full manifest entry from repaired state
+		entry := manifest.Files[path]
+		entry.ContentHash = hash
+		entry.SizePlaintext = int64(len(plaintext))
+		entry.SizeEncrypted = int64(len(encrypted))
+		entry.MergeStrategy = ResolveMergeStrategy(path, cfg.Merge)
+		// Update Mtime from current file stat (important for last_write_wins)
+		if info, err := os.Stat(absPath); err == nil {
+			entry.Mtime = info.ModTime().UTC().Format(time.RFC3339)
+		}
+		// Recompute JSONL line count
+		if strings.HasSuffix(path, ".jsonl") {
+			entry.JSONLLineCount = bytes.Count(plaintext, []byte("\n"))
+			if len(plaintext) > 0 && plaintext[len(plaintext)-1] != '\n' {
+				entry.JSONLLineCount++
+			}
+		}
+		entry.SessionComplete = isSessionComplete(path)
+		manifest.Files[path] = entry
+
 		result.Fixed++
 		if verbose {
 			fmt.Printf("  [fixed] %s (re-sealed from plaintext)\n", path)
 		}
 	}
 
-	// Delete orphans if requested
+	// Save updated manifest before deleting any objects — if save fails,
+	// the old manifest still has valid references to existing objects.
+	if result.Fixed > 0 {
+		if err := manifest.Save(cfg.Seal.SealDir); err != nil {
+			return result, fmt.Errorf("saving manifest: %w", err)
+		}
+	}
+
+	// Delete orphans only after manifest is safely persisted
 	if deleteOrphans {
-		for _, hash := range result.OrphanObjects {
+		// Build set of hashes still referenced by the updated manifest
+		// so we don't delete objects that another entry still needs
+		// (e.g., two files with identical content share one object).
+		referenced := make(map[string]bool)
+		for _, entry := range manifest.Files {
+			referenced[entry.ContentHash] = true
+		}
+
+		// Include superseded hashes (old objects replaced during repair)
+		allOrphans := append(result.OrphanObjects, superseded...)
+		for _, hash := range allOrphans {
+			if referenced[hash] {
+				continue // still needed by another manifest entry
+			}
 			store.Delete(hash)
 			if verbose {
 				fmt.Printf("  [deleted] orphan %s\n", hash[:16])

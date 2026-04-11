@@ -76,13 +76,12 @@ func TestVerifyDetectsMissingObject(t *testing.T) {
 
 	Seal(cfg, identity.Recipient(), false, nil)
 
-	// Delete one object
+	// Delete the object for history.jsonl specifically (has unique content,
+	// unlike abc123.jsonl and agent-abc.jsonl which share the same hash).
 	manifest, _ := LoadManifest(sealDir)
 	store := NewObjectStore(sealDir)
-	for _, entry := range manifest.Files {
-		os.Remove(store.ObjectPath(entry.ContentHash))
-		break // delete just one
-	}
+	entry := manifest.Files["history.jsonl"]
+	os.Remove(store.ObjectPath(entry.ContentHash))
 
 	result, err := Verify(cfg, identity, false)
 	if err != nil {
@@ -127,15 +126,11 @@ func TestRepairFixesMissing(t *testing.T) {
 
 	Seal(cfg, identity.Recipient(), false, nil)
 
-	// Delete one object
+	// Delete the object for history.jsonl (has unique content).
 	manifest, _ := LoadManifest(sealDir)
 	store := NewObjectStore(sealDir)
-	var deletedPath string
-	for path, entry := range manifest.Files {
-		os.Remove(store.ObjectPath(entry.ContentHash))
-		deletedPath = path
-		break
-	}
+	deletedPath := "history.jsonl"
+	os.Remove(store.ObjectPath(manifest.Files[deletedPath].ContentHash))
 
 	// Repair should re-seal from plaintext
 	result, err := Repair(cfg, identity, false, false)
@@ -152,6 +147,54 @@ func TestRepairFixesMissing(t *testing.T) {
 	entry := manifest2.Files[deletedPath]
 	if !store.Exists(entry.ContentHash) {
 		t.Error("object still missing after repair")
+	}
+}
+
+func TestRepairUpdatesManifestWhenPlaintextChanged(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	// Delete the object for history.jsonl (has unique content, unlike
+	// abc123.jsonl and agent-abc.jsonl which share the same hash).
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
+	deletedPath := "history.jsonl"
+	oldHash := manifest.Files[deletedPath].ContentHash
+	os.Remove(store.ObjectPath(oldHash))
+
+	// Modify the plaintext so its hash will differ from manifest
+	newContent := []byte("completely new content after modification")
+	os.WriteFile(filepath.Join(claudeDir, deletedPath), newContent, 0644)
+	expectedHash := ContentHash(newContent)
+
+	// Repair should re-seal from modified plaintext and update manifest
+	result, err := Repair(cfg, identity, false, false)
+	if err != nil {
+		t.Fatalf("Repair() error: %v", err)
+	}
+
+	if result.Fixed != 1 {
+		t.Errorf("expected 1 fixed, got %d", result.Fixed)
+	}
+
+	// Manifest should now point to the new hash, not the old one
+	manifest2, _ := LoadManifest(sealDir)
+	entry := manifest2.Files[deletedPath]
+	if entry.ContentHash == oldHash {
+		t.Error("manifest still points to old hash after repair")
+	}
+	if entry.ContentHash != expectedHash {
+		t.Errorf("manifest hash = %s, want %s", entry.ContentHash[:16], expectedHash[:16])
+	}
+
+	// New object should exist
+	if !store.Exists(expectedHash) {
+		t.Error("new object missing after repair")
 	}
 }
 

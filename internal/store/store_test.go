@@ -161,6 +161,68 @@ func TestSealIncrementalDetectsChanges(t *testing.T) {
 	}
 }
 
+func TestUnsealDeletesRemovedFiles(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	// Seal all files
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	// Remove one file from the manifest (simulate another device deleting it)
+	manifest, _ := LoadManifest(sealDir)
+	var removedPath string
+	for path := range manifest.Files {
+		removedPath = path
+		delete(manifest.Files, path)
+		break
+	}
+	manifest.Save(sealDir)
+
+	// Unseal should delete the stale file
+	stats, err := Unseal(cfg, identity, false, nil)
+	if err != nil {
+		t.Fatalf("Unseal() error: %v", err)
+	}
+
+	if stats.Deleted != 1 {
+		t.Errorf("expected 1 deleted, got %d", stats.Deleted)
+	}
+
+	// Verify the file is gone
+	absPath := filepath.Join(claudeDir, removedPath)
+	if _, err := os.Stat(absPath); !os.IsNotExist(err) {
+		t.Errorf("file %s should have been deleted but still exists", removedPath)
+	}
+}
+
+func TestUnsealDoesNotDeleteUnmanagedFiles(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	// Add a file that doesn't match include patterns (unmanaged)
+	unmanagedPath := filepath.Join(claudeDir, "custom-script.sh")
+	os.WriteFile(unmanagedPath, []byte("#!/bin/bash\necho hi"), 0755)
+
+	// Seal (won't include custom-script.sh)
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	// Unseal should NOT delete the unmanaged file
+	_, err := Unseal(cfg, identity, false, nil)
+	if err != nil {
+		t.Fatalf("Unseal() error: %v", err)
+	}
+
+	if _, err := os.Stat(unmanagedPath); os.IsNotExist(err) {
+		t.Error("unmanaged file was deleted — Unseal should only delete managed files")
+	}
+}
+
 func TestManifestDiff(t *testing.T) {
 	old := &Manifest{
 		Files: map[string]FileEntry{

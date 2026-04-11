@@ -90,10 +90,19 @@ func MergeSessionsIndex(ours, theirs []byte) ([]byte, error) {
 		merged = append(merged, seen[sid])
 	}
 
-	// Build output — try to preserve the original structure
-	var outObj map[string]json.RawMessage
-	if err := json.Unmarshal(ours, &outObj); err != nil {
-		outObj = make(map[string]json.RawMessage)
+	// Build output — merge top-level keys from both sides.
+	// Start with theirs, then overlay ours so ours takes precedence
+	// for shared keys. This preserves metadata from theirs that ours lacks.
+	var theirsObj, oursObj map[string]json.RawMessage
+	json.Unmarshal(theirs, &theirsObj)
+	json.Unmarshal(ours, &oursObj)
+
+	outObj := make(map[string]json.RawMessage)
+	for k, v := range theirsObj {
+		outObj[k] = v
+	}
+	for k, v := range oursObj {
+		outObj[k] = v
 	}
 
 	entriesJSON, err := json.Marshal(merged)

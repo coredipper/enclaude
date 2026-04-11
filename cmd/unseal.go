@@ -32,16 +32,34 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 		cfg.Seal.ClaudeDir = flagClaudeDir
 	}
 
+	if flagDryRun {
+		fmt.Println("(dry run — showing what would change)")
+		diff, err := store.UnsealStatus(cfg)
+		if err != nil {
+			return fmt.Errorf("unseal status: %w", err)
+		}
+		if len(diff.Added) == 0 && len(diff.Modified) == 0 && len(diff.Deleted) == 0 {
+			fmt.Println("  No changes needed.")
+		} else {
+			for _, p := range diff.Added {
+				fmt.Printf("  [restore] %s\n", p)
+			}
+			for _, p := range diff.Modified {
+				fmt.Printf("  [update] %s\n", p)
+			}
+			for _, p := range diff.Deleted {
+				fmt.Printf("  [delete] %s\n", p)
+			}
+		}
+		return nil
+	}
+
 	identity, source, err := crypto.LoadKey()
 	if err != nil {
 		return fmt.Errorf("loading key: %w", err)
 	}
 	if flagVerbose {
 		fmt.Printf("Using key from %s\n", source)
-	}
-
-	if flagDryRun {
-		fmt.Println("(dry run — showing what would be restored)")
 	}
 
 	fmt.Println("Unsealing...")

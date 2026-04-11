@@ -163,8 +163,12 @@ var keyRotateCmd = &cobra.Command{
 
 		// Commit
 		git := gitops.New(sealDir)
-		git.AddAll()
-		git.Commit(fmt.Sprintf("seal: key rotation from %s", cfg.Seal.DeviceID))
+		if err := git.AddAll(); err != nil {
+			return fmt.Errorf("git add: %w", err)
+		}
+		if err := git.Commit(fmt.Sprintf("seal: key rotation from %s", cfg.Seal.DeviceID)); err != nil {
+			return fmt.Errorf("git commit: %w", err)
+		}
 
 		fmt.Printf("\n%s Key rotated.\n", ui.Green("Done."))
 		fmt.Printf("  Old public key: %s\n", ui.Faint(oldPub))

@@ -9,7 +9,12 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+// ConfigVersion tracks the config schema version for one-time migrations.
+// Bump this when adding migrations in Load().
+const ConfigVersion = 2
+
 type Config struct {
+	Version  int            `toml:"config_version"`
 	Seal    SealSection    `toml:"seal"`
 	Sync     SyncSection     `toml:"sync"`
 	Include  PatternSection  `toml:"include"`
@@ -36,6 +41,7 @@ type PatternSection struct {
 
 func DefaultConfig(claudeDir, sealDir string) *Config {
 	return &Config{
+		Version: ConfigVersion,
 		Seal: SealSection{
 			ClaudeDir: claudeDir,
 			SealDir:  sealDir,
@@ -86,7 +92,7 @@ func DefaultConfig(claudeDir, sealDir string) *Config {
 		},
 		Merge: map[string]string{
 			"history.jsonl":                    "jsonl_dedup",
-			"projects/*/sessions-index.json":   "jsonl_dedup",
+			"projects/*/sessions-index.json":   "sessions_index",
 			"stats-cache.json":                 "last_write_wins",
 			"settings.json":                    "last_write_wins",
 			"projects/*/*.jsonl":               "immutable",
@@ -108,6 +114,18 @@ func Load(sealDir string) (*Config, error) {
 	var cfg Config
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing seal.toml: %w", err)
+	}
+
+	// Overlay default merge strategies for keys not present in the loaded config.
+	defaults := DefaultConfig("", "")
+	if cfg.Merge == nil {
+		cfg.Merge = defaults.Merge
+	} else {
+		for pattern, strategy := range defaults.Merge {
+			if _, exists := cfg.Merge[pattern]; !exists {
+				cfg.Merge[pattern] = strategy
+			}
+		}
 	}
 
 	return &cfg, nil

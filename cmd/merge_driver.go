@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/coredipper/enclaude/internal/config"
@@ -113,10 +114,17 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 			continue
 		}
 
-		// Different content — apply merge strategy
-		strategy := merge.Strategy(oursEntry.MergeStrategy)
+		// Different content — resolve merge strategy from config.
+		resolvedStrategy, winningPattern := sealstore.ResolveMergeStrategyWithPattern(path, cfg.Merge)
+		strategy := merge.Strategy(resolvedStrategy)
 		if strategy == "" {
 			strategy = merge.LastWriteWins
+		}
+		// Fail-safe: sessions-index.json is a JSON object, not JSONL.
+		// jsonl_dedup is structurally incompatible and would produce corrupt
+		// data regardless of which config rule resolved it.
+		if strategy == merge.JSONLDedup && filepath.Base(path) == "sessions-index.json" {
+			return fmt.Errorf("refusing to merge %s with jsonl_dedup (sessions-index.json is JSON, not JSONL; rule %q matched). Fix: change the strategy to 'sessions_index' in seal.toml, or run 'enclaude upgrade'", path, winningPattern)
 		}
 
 		// For immutable files, both sides should have the same hash.

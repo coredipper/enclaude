@@ -85,11 +85,11 @@ enclaude unseal
 enclaude remote add origin git@github.com:you/enclaude-data.git
 enclaude push
 
-# On another device
-enclaude init --import-key     # import your key from file or backup passphrase
-enclaude remote add origin git@github.com:you/enclaude-data.git
-enclaude pull
-enclaude hooks install         # auto-sync on session start/end
+# On another device — clone the encrypted repo and import your key
+git clone git@github.com:you/enclaude-data.git ~/.enclaude
+enclaude key import --from-backup   # or: enclaude key import keyfile.txt
+enclaude unseal
+enclaude hooks install
 ```
 
 ### Auto-Sync with Hooks
@@ -98,7 +98,7 @@ enclaude hooks install         # auto-sync on session start/end
 enclaude hooks install
 ```
 
-This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a Claude Code session starts, `enclaude` pulls and unseals the latest data. When it ends, it seals and pushes. Your existing hooks (peon-ping, notchi, etc.) are preserved — the installer appends to the hooks array, never overwrites.
+This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a session starts, `enclaude` unseals the latest sealed data. When it ends, it seals changes locally. To enable automatic remote sync, set `auto_push = true` and `auto_pull = true` in `~/.enclaude/seal.toml`. Your existing hooks (peon-ping, notchi, etc.) are preserved — the installer appends to the hooks array, never overwrites.
 
 ## Commands
 
@@ -145,7 +145,8 @@ When pulling from a remote, two devices may have diverged. `enclaude` uses a cus
 | Strategy | Used for | How it works |
 |----------|----------|-------------|
 | `immutable` | Session JSONL files | Union both sides — sessions never change after completion, so there are no conflicts |
-| `jsonl_dedup` | `history.jsonl`, `sessions-index.json` | Parse each line as JSON, SHA-256 hash for dedup, sort by timestamp |
+| `jsonl_dedup` | `history.jsonl` | Parse each line as JSON, SHA-256 hash for dedup, sort by timestamp |
+| `sessions_index` | `sessions-index.json` | Deduplicate entries by `sessionId`, preserving unique sessions from both sides |
 | `last_write_wins` | `settings.json`, `stats-cache.json` | Keep whichever version has the later modification time |
 | `text_merge` | Memory files (`.md`) | Standard 3-way text merge; conflict markers if both sides changed |
 

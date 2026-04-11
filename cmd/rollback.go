@@ -69,9 +69,16 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("safety seal: %w", err)
 	}
-	if stats.Added > 0 || stats.Modified > 0 {
-		git.AddAll()
-		git.Commit(fmt.Sprintf("seal: pre-rollback safety seal from %s", cfg.Seal.DeviceID))
+	if stats.Errors > 0 {
+		return fmt.Errorf("safety seal had %d errors — resolve before rolling back", stats.Errors)
+	}
+	if stats.HasChanges() {
+		if err := git.AddAll(); err != nil {
+			return fmt.Errorf("git add: %w", err)
+		}
+		if err := git.Commit(fmt.Sprintf("seal: pre-rollback safety seal from %s", cfg.Seal.DeviceID)); err != nil {
+			return fmt.Errorf("git commit: %w", err)
+		}
 		fmt.Printf("    %s\n", stats)
 	} else {
 		fmt.Println("    No changes to commit.")
@@ -83,10 +90,18 @@ func runRollback(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("git checkout: %w\n%s", err, out)
 	}
 
-	// Step 3: Commit the rollback
+	// Step 3: Commit the rollback (if checkout produced changes)
 	fmt.Println("3/4 Committing rollback...")
-	git.AddAll()
-	git.Commit(fmt.Sprintf("seal: rollback to %s from %s", ref, cfg.Seal.DeviceID))
+	if err := git.AddAll(); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+	if git.HasChanges() {
+		if err := git.Commit(fmt.Sprintf("seal: rollback to %s from %s", ref, cfg.Seal.DeviceID)); err != nil {
+			return fmt.Errorf("git commit: %w", err)
+		}
+	} else {
+		fmt.Println("    Already at requested state.")
+	}
 
 	// Step 4: Unseal
 	fmt.Println("4/4 Unsealing restored state...")

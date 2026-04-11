@@ -132,14 +132,24 @@ func handleSessionEnd() error {
 		logHook("seal error: %v", err)
 		return nil
 	}
+	if stats.Errors > 0 {
+		logHook("seal had %d errors, skipping commit", stats.Errors)
+		return nil
+	}
 
 	// Commit if changes
-	if stats.Added > 0 || stats.Modified > 0 {
+	if stats.HasChanges() {
 		git := gitops.New(sealDir)
-		git.AddAll()
-		msg := fmt.Sprintf("seal: auto-seal from %s (%d new, %d modified)",
-			cfg.Seal.DeviceID, stats.Added, stats.Modified)
-		git.Commit(msg)
+		if err := git.AddAll(); err != nil {
+			logHook("git add warning: %v", err)
+			return nil
+		}
+		msg := fmt.Sprintf("seal: auto-seal from %s (%s)",
+			cfg.Seal.DeviceID, stats)
+		if err := git.Commit(msg); err != nil {
+			logHook("git commit warning: %v", err)
+			return nil
+		}
 
 		// Push if auto-push enabled
 		if cfg.Sync.AutoPush && git.HasRemote("origin") {

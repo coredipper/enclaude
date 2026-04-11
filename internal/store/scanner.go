@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,10 +23,20 @@ type ScanResult struct {
 // include patterns but not matching exclude patterns.
 func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, error) {
 	var results []ScanResult
+	var walkErrors int
 
 	err := filepath.Walk(claudeDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // skip inaccessible files
+			// Count errors for paths that could contain managed files.
+			// For directories: any non-excluded dir could have included
+			// descendants. For files: check include/exclude directly.
+			if rel, relErr := filepath.Rel(claudeDir, path); relErr == nil && rel != "." {
+				excluded := matchesAny(rel, excludes) || matchesAny(rel+"/", excludes)
+				if !excluded {
+					walkErrors++
+				}
+			}
+			return nil // continue scanning other files
 		}
 		if info.IsDir() {
 			rel, _ := filepath.Rel(claudeDir, path)
@@ -63,23 +74,29 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 		return nil
 	})
 
-	return results, err
+	if err != nil {
+		return results, err
+	}
+	if walkErrors > 0 {
+		return results, fmt.Errorf("scan incomplete: %d inaccessible file(s)", walkErrors)
+	}
+	return results, nil
 }
 
 // matchesAny checks if a relative path matches any of the glob patterns.
 // Supports ** for recursive directory matching.
 func matchesAny(relPath string, patterns []string) bool {
 	for _, pattern := range patterns {
-		if matchGlob(relPath, pattern) {
+		if MatchGlob(relPath, pattern) {
 			return true
 		}
 	}
 	return false
 }
 
-// matchGlob matches a path against a glob pattern with ** support.
+// MatchGlob matches a path against a glob pattern with ** support.
 // It splits both path and pattern into segments and matches segment-by-segment.
-func matchGlob(path, pattern string) bool {
+func MatchGlob(path, pattern string) bool {
 	if !strings.Contains(pattern, "**") {
 		matched, _ := filepath.Match(pattern, path)
 		return matched
