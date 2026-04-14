@@ -262,13 +262,36 @@ func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
 
 func containsMarker(cmd string) bool {
 	// Match both bare ("enclaude hook-handler ...") and shell-quoted
-	// ("'/path/to/enclaude' hook-handler ...") forms by verifying
-	// argv[0] is "enclaude" or ends with "/enclaude" (possibly quoted)
-	// and argv[1] is "hook-handler".
-	fields := strings.Fields(cmd)
-	if len(fields) < 2 || fields[1] != "hook-handler" {
+	// ("'/path with spaces/enclaude' hook-handler ...") forms.
+	// We extract argv[0] respecting quotes, then check the remainder
+	// starts with "hook-handler".
+	arg0, rest := splitShellArg0(cmd)
+	arg0 = strings.Trim(arg0, "'\"")
+	if arg0 != "enclaude" && !strings.HasSuffix(arg0, "/enclaude") {
 		return false
 	}
-	arg0 := strings.Trim(fields[0], "'\"")
-	return arg0 == "enclaude" || strings.HasSuffix(arg0, "/enclaude")
+	rest = strings.TrimSpace(rest)
+	return strings.HasPrefix(rest, "hook-handler")
+}
+
+// splitShellArg0 splits a command string into its first argument and
+// the remainder, respecting single and double quotes around arg0.
+func splitShellArg0(cmd string) (arg0, rest string) {
+	cmd = strings.TrimSpace(cmd)
+	if len(cmd) == 0 {
+		return "", ""
+	}
+	if cmd[0] == '\'' || cmd[0] == '"' {
+		quote := cmd[0]
+		end := strings.IndexByte(cmd[1:], quote)
+		if end >= 0 {
+			// include the quotes in arg0 so caller can strip them
+			return cmd[:end+2], cmd[end+2:]
+		}
+	}
+	// unquoted: split on first space
+	if i := strings.IndexByte(cmd, ' '); i >= 0 {
+		return cmd[:i], cmd[i:]
+	}
+	return cmd, ""
 }
