@@ -203,7 +203,8 @@ func TestContainsMarker(t *testing.T) {
 		{"/Users/bogdan/go/bin/enclaude hook-handler session-start", true},
 		{`"/opt/homebrew/bin/enclaude" hook-handler session-end`, true},
 		{"'/path with spaces/enclaude' hook-handler session-start", true},
-		{"'/it'\\''s here/enclaude' hook-handler session-end", true}, // escaped apostrophe via '\''
+		{"'/it'\\''s here/enclaude' hook-handler session-end", true},  // escaped apostrophe via '\''
+		{"'/usr/local/bin/enclaude'\nhook-handler session-start", true}, // newline as token separator
 		// Should NOT match
 		{"some-script --enclaude --hook-handler", false},
 		{"/path/to/hook-handler enclaude", false},

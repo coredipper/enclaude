@@ -310,7 +310,7 @@ func shellSplitFirst(cmd string) (token, rest string) {
 			}
 			b.WriteString(cmd[i+1 : i+1+end])
 			i = i + 1 + end + 1
-		case ' ', '\t':
+		case ' ', '\t', '\n':
 			return b.String(), cmd[i:]
 		default:
 			b.WriteByte(cmd[i])
