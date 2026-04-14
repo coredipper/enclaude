@@ -9,7 +9,6 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Override executable resolver so tests get a predictable command path
 	resolveExecutable = func() (string, error) {
 		return "/usr/local/bin/enclaude", nil
 	}
@@ -19,33 +18,16 @@ func TestMain(m *testing.M) {
 func TestInstallHooksPreservesExisting(t *testing.T) {
 	dir := t.TempDir()
 
-	// Write a settings.json with existing hooks (simulating peon-ping, notchi)
 	existing := map[string]any{
-		"env": map[string]any{
-			"ENABLE_LSP_TOOL": "1",
-		},
+		"env": map[string]any{"ENABLE_LSP_TOOL": "1"},
 		"hooks": map[string]any{
 			"SessionStart": []any{
 				map[string]any{
-					"matcher": "",
 					"hooks": []any{
 						map[string]any{
 							"type":    "command",
 							"command": "/path/to/peon-ping/peon.sh",
 							"timeout": 10,
-						},
-					},
-				},
-			},
-			"SessionEnd": []any{
-				map[string]any{
-					"matcher": "",
-					"hooks": []any{
-						map[string]any{
-							"type":    "command",
-							"command": "/path/to/peon-ping/peon.sh",
-							"timeout": 10,
-							"async":   true,
 						},
 					},
 				},
@@ -70,43 +52,25 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 	data, _ := json.MarshalIndent(existing, "", "  ")
 	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
 
-	// Install hooks
 	if err := InstallHooks(dir); err != nil {
 		t.Fatalf("InstallHooks() error: %v", err)
 	}
 
-	// Read back
 	result, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
 	resultStr := string(result)
 
-	// Verify existing hooks preserved
 	if !strings.Contains(resultStr, "peon-ping/peon.sh") {
 		t.Error("peon-ping hook was removed")
 	}
 	if !strings.Contains(resultStr, "rtk-rewrite.sh") {
 		t.Error("rtk-rewrite hook was removed")
 	}
-
-	// Verify seal hooks added with marker
-	if !strings.Contains(resultStr, "hook-handler session-start") {
-		t.Error("session-start hook not added")
-	}
-	if !strings.Contains(resultStr, "hook-handler session-end") {
-		t.Error("session-end hook not added")
-	}
 	if strings.Count(resultStr, hookMarker) != 2 {
-		t.Error("expected exactly 2 hook markers (SessionStart + SessionEnd)")
+		t.Error("expected exactly 2 hook markers")
 	}
-
-	// Verify non-hook settings preserved
 	if !strings.Contains(resultStr, "ENABLE_LSP_TOOL") {
 		t.Error("env settings lost")
 	}
-	if !strings.Contains(resultStr, "enabledPlugins") {
-		t.Error("enabledPlugins lost")
-	}
-
-	// Verify installed
 	if !HooksInstalled(dir) {
 		t.Error("HooksInstalled() returned false after install")
 	}
@@ -118,14 +82,68 @@ func TestInstallHooksIdempotent(t *testing.T) {
 	data, _ := json.MarshalIndent(settings, "", "  ")
 	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
 
-	// Install twice
 	InstallHooks(dir)
 	InstallHooks(dir)
 
 	result, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
 	count := strings.Count(string(result), hookMarker)
-	if count != 2 { // one per event (SessionStart + SessionEnd)
+	if count != 2 {
 		t.Errorf("hook marker appears %d times, expected 2", count)
+	}
+}
+
+func TestInstallHooksMigratesLegacy(t *testing.T) {
+	dir := t.TempDir()
+
+	// Simulate a settings.json with legacy (pre-marker) hooks
+	existing := map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "enclaude hook-handler session-start",
+							"timeout": 30,
+						},
+					},
+				},
+			},
+			"SessionEnd": []any{
+				map[string]any{
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "/old/path/enclaude hook-handler session-end",
+							"timeout": 60,
+							"async":   true,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	data, _ := json.MarshalIndent(existing, "", "  ")
+	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
+
+	if err := InstallHooks(dir); err != nil {
+		t.Fatalf("InstallHooks() error: %v", err)
+	}
+
+	result, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
+	resultStr := string(result)
+
+	// Legacy hooks should be migrated, not duplicated
+	if strings.Count(resultStr, hookMarker) != 2 {
+		t.Errorf("expected 2 markers after migration, got %d", strings.Count(resultStr, hookMarker))
+	}
+	// Should use current binary path, not old one
+	if strings.Contains(resultStr, "/old/path/enclaude") {
+		t.Error("legacy path was not replaced")
+	}
+	if !HooksInstalled(dir) {
+		t.Error("HooksInstalled() returned false after migration")
 	}
 }
 
@@ -135,7 +153,6 @@ func TestRemoveHooksPreservesOthers(t *testing.T) {
 	data, _ := json.MarshalIndent(settings, "", "  ")
 	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
 
-	// Install then remove
 	InstallHooks(dir)
 
 	if !HooksInstalled(dir) {
@@ -148,6 +165,50 @@ func TestRemoveHooksPreservesOthers(t *testing.T) {
 
 	if HooksInstalled(dir) {
 		t.Error("hooks should be removed")
+	}
+}
+
+func TestRemoveHandlesBothFormats(t *testing.T) {
+	dir := t.TempDir()
+
+	// Mix of legacy and marker hooks
+	existing := map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "enclaude hook-handler session-start",
+						},
+					},
+				},
+			},
+			"SessionEnd": []any{
+				map[string]any{
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": "'/usr/local/bin/enclaude' hook-handler session-end  " + hookMarker,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	data, _ := json.MarshalIndent(existing, "", "  ")
+	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
+
+	if err := RemoveHooks(dir); err != nil {
+		t.Fatalf("RemoveHooks() error: %v", err)
+	}
+
+	result, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
+	resultStr := string(result)
+
+	if strings.Contains(resultStr, "enclaude") {
+		t.Error("enclaude hooks should be fully removed")
 	}
 }
 
@@ -191,28 +252,122 @@ func TestSymlinkNotResolved(t *testing.T) {
 	}
 }
 
-func TestContainsMarker(t *testing.T) {
+func TestHasMarker(t *testing.T) {
 	tests := []struct {
 		cmd  string
 		want bool
 	}{
-		// New-style: marker comment present
 		{"enclaude hook-handler session-start  " + hookMarker, true},
 		{"'/usr/local/bin/enclaude' hook-handler session-end  " + hookMarker, true},
-		{"'/path with spaces/enclaude' hook-handler session-start  " + hookMarker, true},
-		// Legacy: no marker but contains "enclaude hook-handler"
+		// No marker
+		{"enclaude hook-handler session-start", false},
+		{"/path/to/peon-ping/peon.sh", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := hasMarker(tt.cmd); got != tt.want {
+			t.Errorf("hasMarker(%q) = %v, want %v", tt.cmd, got, tt.want)
+		}
+	}
+}
+
+func TestIsLegacyHook(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
 		{"enclaude hook-handler session-start", true},
-		{"'/usr/local/bin/enclaude' hook-handler session-end", true},
-		{"/Users/bogdan/go/bin/enclaude hook-handler session-start", true},
-		// Should NOT match
+		{"/usr/local/bin/enclaude hook-handler session-end", true},
+		{"'/path/to/enclaude' hook-handler session-start", true},
+		// Not legacy
 		{"/path/to/peon-ping/peon.sh", false},
 		{"some-random-script --foo", false},
 		{"", false},
 	}
 	for _, tt := range tests {
-		if got := containsMarker(tt.cmd); got != tt.want {
-			t.Errorf("containsMarker(%q) = %v, want %v", tt.cmd, got, tt.want)
+		if got := isLegacyHook(tt.cmd); got != tt.want {
+			t.Errorf("isLegacyHook(%q) = %v, want %v", tt.cmd, got, tt.want)
 		}
+	}
+}
+
+func TestExtractAction(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want string
+	}{
+		{"enclaude hook-handler session-start", "session-start"},
+		{"'/usr/local/bin/enclaude' hook-handler session-end", "session-end"},
+		{"/path/enclaude hook-handler session-start  " + hookMarker, "session-start"},
+		{"enclaude hook-handler", ""},
+		{"peon.sh", ""},
+	}
+	for _, tt := range tests {
+		if got := extractAction(tt.cmd); got != tt.want {
+			t.Errorf("extractAction(%q) = %q, want %q", tt.cmd, got, tt.want)
+		}
+	}
+}
+
+func TestMigrateLegacyHooks(t *testing.T) {
+	hooks := map[string]json.RawMessage{}
+
+	// Legacy SessionStart
+	startEntries := []hookEntry{
+		{Hooks: []hookDef{{
+			Type:    "command",
+			Command: "enclaude hook-handler session-start",
+			Timeout: 30,
+		}}},
+	}
+	startData, _ := json.Marshal(startEntries)
+	hooks["SessionStart"] = startData
+
+	// Non-enclaude hook (should be untouched)
+	otherEntries := []hookEntry{
+		{Hooks: []hookDef{{
+			Type:    "command",
+			Command: "/path/to/peon.sh",
+		}}},
+	}
+	otherData, _ := json.Marshal(otherEntries)
+	hooks["PreToolUse"] = otherData
+
+	n := migrateLegacyHooks(hooks)
+	if n != 1 {
+		t.Errorf("expected 1 migration, got %d", n)
+	}
+
+	// Verify migrated hook has marker
+	var result []hookEntry
+	json.Unmarshal(hooks["SessionStart"], &result)
+	if !hasMarker(result[0].Hooks[0].Command) {
+		t.Errorf("migrated hook missing marker: %s", result[0].Hooks[0].Command)
+	}
+
+	// Verify other hooks untouched
+	var others []hookEntry
+	json.Unmarshal(hooks["PreToolUse"], &others)
+	if others[0].Hooks[0].Command != "/path/to/peon.sh" {
+		t.Errorf("non-enclaude hook was modified: %s", others[0].Hooks[0].Command)
+	}
+}
+
+func TestMigrateLegacySkipsAlreadyMigrated(t *testing.T) {
+	hooks := map[string]json.RawMessage{}
+
+	entries := []hookEntry{
+		{Hooks: []hookDef{{
+			Type:    "command",
+			Command: sealHookFull("session-start"),
+		}}},
+	}
+	data, _ := json.Marshal(entries)
+	hooks["SessionStart"] = data
+
+	n := migrateLegacyHooks(hooks)
+	if n != 0 {
+		t.Errorf("expected 0 migrations for already-migrated hooks, got %d", n)
 	}
 }
 

@@ -81,6 +81,9 @@ func InstallHooks(claudeDir string) error {
 		hooks = make(map[string]json.RawMessage)
 	}
 
+	// Upgrade any pre-marker hooks to current format
+	migrateLegacyHooks(hooks)
+
 	// Add SessionStart hook
 	if err := addHookEntry(hooks, "SessionStart", hookEntry{
 		Hooks: []hookDef{{
@@ -193,10 +196,11 @@ func addHookEntry(hooks map[string]json.RawMessage, event string, entry hookEntr
 		}
 	}
 
-	// Check if seal hook already exists
+	// Check if seal hook already exists (marker-only — legacy hooks
+	// are migrated before addHookEntry is called)
 	for _, e := range entries {
 		for _, h := range e.Hooks {
-			if containsMarker(h.Command) {
+			if hasMarker(h.Command) {
 				return nil // already installed
 			}
 		}
@@ -226,27 +230,20 @@ func removeHookEntries(hooks map[string]json.RawMessage, event string) {
 
 	var filtered []hookEntry
 	for _, e := range entries {
-		isSeal := false
+		isOurs := false
 		for _, h := range e.Hooks {
-			if containsMarker(h.Command) {
-				isSeal = true
+			if hasMarker(h.Command) || isLegacyHook(h.Command) {
+				isOurs = true
 				break
 			}
 		}
-		if !isSeal {
+		if !isOurs {
 			filtered = append(filtered, e)
 		}
 	}
 
-	if len(filtered) == 0 {
-		// Don't leave empty arrays; remove the key entirely
-		// Actually, keep it as empty array to preserve the key
-		data, _ := json.Marshal(filtered)
-		hooks[event] = data
-	} else {
-		data, _ := json.Marshal(filtered)
-		hooks[event] = data
-	}
+	data, _ := json.Marshal(filtered)
+	hooks[event] = data
 }
 
 func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
@@ -260,7 +257,7 @@ func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
 	}
 	for _, e := range entries {
 		for _, h := range e.Hooks {
-			if containsMarker(h.Command) {
+			if hasMarker(h.Command) {
 				return true
 			}
 		}
@@ -268,13 +265,74 @@ func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
 	return false
 }
 
-func containsMarker(cmd string) bool {
-	// New-style: marker comment (written by current version)
-	if strings.Contains(cmd, hookMarker) {
-		return true
-	}
-	// Legacy: hooks installed before the marker was introduced.
-	// Checks for "enclaude" and "hook-handler" as separate substrings
-	// to handle both bare and shell-quoted path forms.
+// hasMarker checks whether a command carries the enclaude marker comment.
+// This is the sole detection mechanism for current-format hooks.
+func hasMarker(cmd string) bool {
+	return strings.Contains(cmd, hookMarker)
+}
+
+// isLegacyHook detects pre-marker enclaude hooks by checking for both
+// "enclaude" and "hook-handler" as substrings. Intentionally loose —
+// used only by migration and removal, never for idempotency checks.
+func isLegacyHook(cmd string) bool {
 	return strings.Contains(cmd, "enclaude") && strings.Contains(cmd, "hook-handler")
+}
+
+// extractAction extracts the hook action (e.g. "session-start") from a
+// legacy hook command. Finds "hook-handler" and returns the next token.
+func extractAction(cmd string) string {
+	const sentinel = "hook-handler"
+	idx := strings.Index(cmd, sentinel)
+	if idx < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(cmd[idx+len(sentinel):])
+	if rest == "" {
+		return ""
+	}
+	if i := strings.IndexByte(rest, ' '); i >= 0 {
+		return rest[:i]
+	}
+	return rest
+}
+
+// migrateLegacyHooks upgrades pre-marker hook commands to the current
+// marker format. Returns the number of hooks migrated.
+func migrateLegacyHooks(hooks map[string]json.RawMessage) int {
+	migrated := 0
+	for event, raw := range hooks {
+		var entries []hookEntry
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			continue
+		}
+
+		changed := false
+		for i := range entries {
+			for j := range entries[i].Hooks {
+				h := &entries[i].Hooks[j]
+				if hasMarker(h.Command) {
+					continue
+				}
+				if !isLegacyHook(h.Command) {
+					continue
+				}
+				action := extractAction(h.Command)
+				if action == "" {
+					continue
+				}
+				h.Command = sealHookFull(action)
+				changed = true
+				migrated++
+			}
+		}
+
+		if changed {
+			data, err := json.Marshal(entries)
+			if err != nil {
+				continue
+			}
+			hooks[event] = data
+		}
+	}
+	return migrated
 }
