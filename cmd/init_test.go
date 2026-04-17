@@ -29,8 +29,8 @@ func TestBuildReadme(t *testing.T) {
 			absent: []string{
 				"{PUBLIC_KEY}",
 				"{DEVICE_ID}",
-				"{T}",
-				"{F}",
+				"{TICK}",
+				"{FENCE}",
 			},
 		},
 		{
@@ -55,8 +55,8 @@ func TestBuildReadme(t *testing.T) {
 				"```",
 			},
 			absent: []string{
-				"{T}",
-				"{F}",
+				"{TICK}",
+				"{FENCE}",
 			},
 		},
 	}

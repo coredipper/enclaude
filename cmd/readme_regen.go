@@ -49,24 +49,36 @@ func runReadmeRegen(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("Wrote README.md")
 
-	gitAdd := exec.Command("git", "-C", sealDir, "add", "README.md")
-	if err := gitAdd.Run(); err != nil {
-		return fmt.Errorf("git add: %w", err)
+	committed, err := stageAndCommitReadme(cmd, sealDir)
+	if err != nil {
+		return err
 	}
-
-	// Skip commit if nothing changed.
-	if err := exec.Command("git", "-C", sealDir, "diff", "--quiet", "--cached", "README.md").Run(); err == nil {
+	if !committed {
 		fmt.Println("README.md unchanged, nothing to commit.")
 		return nil
-	}
-
-	gitCommit := exec.Command("git", "-C", sealDir, "commit", "-m", "seal: regenerate README.md")
-	gitCommit.Stdout = cmd.OutOrStdout()
-	gitCommit.Stderr = cmd.ErrOrStderr()
-	if err := gitCommit.Run(); err != nil {
-		return fmt.Errorf("git commit: %w", err)
 	}
 	fmt.Println("Committed README.md")
 
 	return nil
+}
+
+func stageAndCommitReadme(cmd *cobra.Command, sealDir string) (bool, error) {
+	gitAdd := exec.Command("git", "-C", sealDir, "add", "README.md")
+	if err := gitAdd.Run(); err != nil {
+		return false, fmt.Errorf("git add: %w", err)
+	}
+
+	// Skip commit if nothing changed.
+	if err := exec.Command("git", "-C", sealDir, "diff", "--quiet", "--cached", "README.md").Run(); err == nil {
+		return false, nil
+	}
+
+	gitCommit := exec.Command("git", "-C", sealDir, "commit", "--only", "-m", "seal: regenerate README.md", "README.md")
+	gitCommit.Stdout = cmd.OutOrStdout()
+	gitCommit.Stderr = cmd.ErrOrStderr()
+	if err := gitCommit.Run(); err != nil {
+		return false, fmt.Errorf("git commit: %w", err)
+	}
+
+	return true, nil
 }

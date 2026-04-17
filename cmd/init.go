@@ -168,38 +168,38 @@ read without the private key stored in the OS keychain on the originating device
 ## Restoring on a new machine
 
 1. Install enclaude.
-2. Clone this repository to {T}~/.enclaude/{T}:
-   {T}git clone <remote-url> ~/.enclaude{T}
+2. Clone this repository to {TICK}~/.enclaude/{TICK}:
+	{TICK}git clone <remote-url> ~/.enclaude{TICK}
 3. Import your private key into the keychain:
-   {T}enclaude key import{T}
+	{TICK}enclaude key import{TICK}
 4. Decrypt and restore your Claude files:
-   {T}enclaude unseal{T}
+	{TICK}enclaude unseal{TICK}
 
 ## Key recovery
 
 If the OS keychain entry is lost, restore from the passphrase-encrypted backup:
 
-{F}
+{FENCE}
 enclaude key recover key.age.backup
-{F}
+{FENCE}
 
-You will be prompted for the passphrase you set during {T}enclaude init{T}.
+You will be prompted for the passphrase you set during {TICK}enclaude init{TICK}.
 
 ## Daily use
 
-{F}
+{FENCE}
 enclaude seal          # encrypt and commit changes
 enclaude push          # push to remote
 enclaude pull          # pull and decrypt latest
 enclaude status        # show unsealed changes not yet sealed
-{F}
+{FENCE}
 `
 
 func buildReadme(publicKey, deviceID string) string {
 	return strings.NewReplacer(
 		"{PUBLIC_KEY}", publicKey,
 		"{DEVICE_ID}", deviceID,
-		"{T}", "`",
-		"{F}", "```",
+		"{TICK}", "`",
+		"{FENCE}", "```",
 	).Replace(readmeTemplate)
 }
