@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -223,26 +224,62 @@ func TestMergeJSONLNonJSONDeduplicated(t *testing.T) {
 	}
 }
 
-func TestMergeJSONLISOTimestampsStableOutput(t *testing.T) {
+func TestMergeJSONLISOTimestampsChronologicalOrder(t *testing.T) {
+	// ours has events a (Jan 1) and b (Jan 2); theirs has event c (Jan 3).
+	// After merge the three events must appear in chronological order
+	// regardless of which side each came from.
 	ours := []byte(`{"event":"a","timestamp":"2024-01-01T00:00:00Z"}
 {"event":"b","timestamp":"2024-01-02T00:00:00Z"}
 `)
 	theirs := []byte(`{"event":"c","timestamp":"2024-01-03T00:00:00Z"}
 `)
 
-	result1, err := MergeJSONL(ours, theirs)
+	merged, err := MergeJSONL(ours, theirs)
 	if err != nil {
-		t.Fatalf("first MergeJSONL() error: %v", err)
+		t.Fatalf("MergeJSONL() error: %v", err)
 	}
-	result2, err := MergeJSONL(ours, theirs)
+
+	lines := nonEmptyLines(string(merged))
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d: %s", len(lines), string(merged))
+	}
+
+	// Verify chronological order by checking the "event" field sequence.
+	for i, want := range []string{"a", "b", "c"} {
+		var obj map[string]string
+		if err := json.Unmarshal([]byte(lines[i]), &obj); err != nil {
+			t.Fatalf("line %d is not valid JSON: %v", i, err)
+		}
+		if obj["event"] != want {
+			t.Errorf("line %d: got event=%q, want %q (full output: %s)", i, obj["event"], want, string(merged))
+		}
+	}
+}
+
+func TestMergeJSONLISOTimestampsInterleavedChronologicalOrder(t *testing.T) {
+	// Events interleaved across ours/theirs — Jan 1 in theirs, Jan 2 in ours.
+	// The sort must produce chronological order, not arrival order.
+	ours := []byte(`{"event":"b","timestamp":"2024-01-02T00:00:00Z"}
+`)
+	theirs := []byte(`{"event":"a","timestamp":"2024-01-01T00:00:00Z"}
+`)
+
+	merged, err := MergeJSONL(ours, theirs)
 	if err != nil {
-		t.Fatalf("second MergeJSONL() error: %v", err)
+		t.Fatalf("MergeJSONL() error: %v", err)
 	}
-	if string(result1) != string(result2) {
-		t.Error("ISO timestamp merge should produce deterministic output across calls")
+
+	lines := nonEmptyLines(string(merged))
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %s", len(lines), string(merged))
 	}
-	if len(nonEmptyLines(string(result1))) != 3 {
-		t.Fatalf("expected 3 lines, got %d", len(nonEmptyLines(string(result1))))
+
+	var first map[string]string
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("line 0 is not valid JSON: %v", err)
+	}
+	if first["event"] != "a" {
+		t.Errorf("expected earlier event first, got event=%q (full output: %s)", first["event"], string(merged))
 	}
 }
 

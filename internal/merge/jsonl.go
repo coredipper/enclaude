@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // MergeJSONL merges two JSONL byte slices by deduplicating lines.
@@ -154,16 +155,13 @@ func extractTimestamp(line string) float64 {
 		return ts
 	}
 
-	// Try "timestamp" as string (session JSONL uses ISO format)
+	// Try "timestamp" as string (session JSONL uses ISO 8601 / RFC 3339 format)
 	if ts, ok := obj["timestamp"].(string); ok {
-		// Simple lexicographic ordering works for ISO 8601
-		h := sha256.Sum256([]byte(ts))
-		// Convert first 8 bytes to float for ordering
-		var f float64
-		for i := 0; i < 8; i++ {
-			f = f*256 + float64(h[i])
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+			if t, err := time.Parse(layout, ts); err == nil {
+				return float64(t.UnixNano())
+			}
 		}
-		return f
 	}
 
 	return 0
