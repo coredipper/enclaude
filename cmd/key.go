@@ -69,10 +69,10 @@ var keyImportCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("reading key backup: %w", err)
 			}
-			fmt.Print("Backup passphrase: ")
-			reader := bufio.NewReader(os.Stdin)
-			passphrase, _ := reader.ReadString('\n')
-			passphrase = strings.TrimSpace(passphrase)
+			passphrase, err := ui.ReadPassphrase("Backup passphrase: ", false)
+			if err != nil {
+				return fmt.Errorf("reading passphrase: %w", err)
+			}
 
 			decrypted, err := crypto.DecryptWithPassphrase(encrypted, passphrase)
 			if err != nil {
@@ -101,11 +101,12 @@ var keyImportCmd = &cobra.Command{
 			return fmt.Errorf("invalid key: %w", err)
 		}
 
-		if err := crypto.StoreKey(identity); err != nil {
+		source, err := crypto.StoreKey(identity)
+		if err != nil {
 			return fmt.Errorf("storing key: %w", err)
 		}
 
-		fmt.Printf("%s Key imported.\n", ui.Green("OK"))
+		fmt.Printf("%s Key imported (stored in %s).\n", ui.Green("OK"), source)
 		fmt.Printf("Public key: %s\n", identity.Recipient().String())
 		return nil
 	},
@@ -142,16 +143,17 @@ var keyRotateCmd = &cobra.Command{
 		}
 		fmt.Printf("  Re-encrypted %d objects.\n", rotated)
 
-		// Store new key in keychain (replaces old)
-		if err := crypto.StoreKey(newIdentity); err != nil {
+		// Store new key (replaces old) — keyring or file fallback
+		if _, err := crypto.StoreKey(newIdentity); err != nil {
 			return fmt.Errorf("storing new key: %w", err)
 		}
 
 		// Create new backup
-		fmt.Print("\nNew backup passphrase (or Enter to skip): ")
-		reader := bufio.NewReader(os.Stdin)
-		passphrase, _ := reader.ReadString('\n')
-		passphrase = strings.TrimSpace(passphrase)
+		fmt.Println()
+		passphrase, err := ui.ReadPassphraseOptional("New backup passphrase (or Enter to skip): ")
+		if err != nil {
+			return fmt.Errorf("reading backup passphrase: %w", err)
+		}
 		if passphrase != "" {
 			backup, err := crypto.EncryptWithPassphrase([]byte(newIdentity.String()), passphrase)
 			if err != nil {

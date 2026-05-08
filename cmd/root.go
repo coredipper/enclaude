@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -33,6 +35,8 @@ func Execute() {
 }
 
 func init() {
+	crypto.DefaultPassphraseFunc = ui.ReadPassphrase
+
 	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false, "show what would happen without doing it")
 	rootCmd.PersistentFlags().StringVar(&flagClaudeDir, "claude-dir", "", "override ~/.claude/ location")

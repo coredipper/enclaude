@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +10,7 @@ import (
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/store"
+	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -51,12 +51,19 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  Public key: %s\n", identity.Recipient().String())
 
-	// 2. Store in OS keychain
-	fmt.Println("Storing private key in OS keychain...")
-	if err := crypto.StoreKey(identity); err != nil {
-		return fmt.Errorf("storing key in keychain: %w", err)
+	// 2. Store private key (OS keyring, or passphrase-encrypted file fallback)
+	fmt.Println("Storing private key...")
+	source, err := crypto.StoreKey(identity)
+	if err != nil {
+		return fmt.Errorf("storing key: %w", err)
 	}
-	fmt.Println("  Stored in keychain.")
+	switch source {
+	case crypto.SourceKeyring:
+		fmt.Println("  Stored in OS keyring.")
+	case crypto.SourceFile:
+		path, _ := crypto.KeyFilePath()
+		fmt.Printf("  Stored in encrypted key file: %s\n", path)
+	}
 
 	// 3. Create seal directory
 	if err := os.MkdirAll(sealDir, 0700); err != nil {
@@ -64,10 +71,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Create passphrase-encrypted backup
-	fmt.Print("\nEnter backup passphrase (for key recovery): ")
-	reader := bufio.NewReader(os.Stdin)
-	passphrase, _ := reader.ReadString('\n')
-	passphrase = strings.TrimSpace(passphrase)
+	fmt.Println()
+	passphrase, err := ui.ReadPassphraseOptional("Enter backup passphrase (for key recovery, blank to skip): ")
+	if err != nil {
+		return fmt.Errorf("reading backup passphrase: %w", err)
+	}
 
 	if passphrase != "" {
 		backup, err := crypto.EncryptWithPassphrase([]byte(identity.String()), passphrase)
