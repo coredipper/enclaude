@@ -7,13 +7,59 @@ import (
 	"path/filepath"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/gitops"
-	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/coredipper/enclaude/internal/store"
+	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
 )
+
+// keyRotateDeps groups the side-effecting operations rotateKeyCore performs.
+// Injected so tests can verify ordering and failure semantics without touching
+// a real seal store, keyring, or filesystem.
+type keyRotateDeps struct {
+	loadKey  func() (*age.X25519Identity, error)
+	genKey   func() (*age.X25519Identity, error)
+	storeKey func(*age.X25519Identity) error
+	rotate   func(old *age.X25519Identity, newRecipient *age.X25519Recipient) (int, error)
+}
+
+// rotateKeyCore performs key rotation in the only safe order:
+//
+//  1. Load old key.
+//  2. Generate new key.
+//  3. Persist the new key.
+//  4. Re-encrypt all sealed objects to the new key.
+//
+// Persisting BEFORE re-encryption is critical: if storeKey prompts the user
+// (file fallback) and they cancel, or any other persistence failure occurs,
+// the seal store is still intact under the old key. Doing rotate first and
+// then storeKey would leave every object encrypted to a key that exists only
+// in process memory if storeKey fails — total data loss.
+func rotateKeyCore(d keyRotateDeps) (old, new *age.X25519Identity, rotated int, err error) {
+	old, err = d.loadKey()
+	if err != nil {
+		err = fmt.Errorf("loading current key: %w", err)
+		return
+	}
+	new, err = d.genKey()
+	if err != nil {
+		err = fmt.Errorf("generating new key: %w", err)
+		return
+	}
+	if err = d.storeKey(new); err != nil {
+		err = fmt.Errorf("storing new key (seal store untouched): %w", err)
+		return
+	}
+	rotated, err = d.rotate(old, new.Recipient())
+	if err != nil {
+		err = fmt.Errorf("rotation: %w", err)
+		return
+	}
+	return
+}
 
 var keyCmd = &cobra.Command{
 	Use:   "key",
@@ -123,30 +169,29 @@ var keyRotateCmd = &cobra.Command{
 			return err
 		}
 
-		oldIdentity, _, err := crypto.LoadKey()
+		deps := keyRotateDeps{
+			loadKey: func() (*age.X25519Identity, error) {
+				id, _, err := crypto.LoadKey()
+				return id, err
+			},
+			genKey: crypto.GenerateKey,
+			storeKey: func(id *age.X25519Identity) error {
+				_, err := crypto.StoreKey(id)
+				return err
+			},
+			rotate: func(old *age.X25519Identity, newRecipient *age.X25519Recipient) (int, error) {
+				fmt.Println("Re-encrypting all objects...")
+				return store.Rotate(cfg, old, newRecipient, flagVerbose, nil)
+			},
+		}
+
+		oldIdentity, newIdentity, rotated, err := rotateKeyCore(deps)
 		if err != nil {
-			return fmt.Errorf("loading current key: %w", err)
+			return err
 		}
 		oldPub := oldIdentity.Recipient().String()
-
-		fmt.Println("Generating new key...")
-		newIdentity, err := crypto.GenerateKey()
-		if err != nil {
-			return fmt.Errorf("generating new key: %w", err)
-		}
 		newPub := newIdentity.Recipient().String()
-
-		fmt.Println("Re-encrypting all objects...")
-		rotated, err := store.Rotate(cfg, oldIdentity, newIdentity.Recipient(), flagVerbose, nil)
-		if err != nil {
-			return fmt.Errorf("rotation: %w", err)
-		}
 		fmt.Printf("  Re-encrypted %d objects.\n", rotated)
-
-		// Store new key (replaces old) — keyring or file fallback
-		if _, err := crypto.StoreKey(newIdentity); err != nil {
-			return fmt.Errorf("storing new key: %w", err)
-		}
 
 		// Create new backup
 		fmt.Println()
