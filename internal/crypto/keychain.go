@@ -26,6 +26,14 @@ const (
 // implementation should prompt twice and verify the two inputs match.
 type PassphraseFunc func(prompt string, confirm bool) (string, error)
 
+// Indirection so tests can simulate transient keyring failures (D-Bus blip,
+// locked keyring) independently of go-keyring's global error mock.
+var (
+	keyringSet    = keyring.Set
+	keyringGet    = keyring.Get
+	keyringDelete = keyring.Delete
+)
+
 // DefaultPassphraseFunc is consulted by StoreKey/LoadKey when the OS keyring
 // is unavailable and a passphrase is needed for the file fallback. The cmd
 // layer wires this to ui.ReadPassphrase at startup.
@@ -36,10 +44,26 @@ var DefaultPassphraseFunc PassphraseFunc
 // falls back to a passphrase-encrypted file under $XDG_CONFIG_HOME/enclaude.
 // Returns SourceKeyring or SourceFile indicating where the key was written.
 func StoreKey(identity *age.X25519Identity) (string, error) {
-	if err := keyring.Set(keychainService, keychainAccount, identity.String()); err == nil {
+	setErr := keyringSet(keychainService, keychainAccount, identity.String())
+	if setErr == nil {
+		// Keyring now authoritative. Drop any stale file fallback so it
+		// cannot shadow this entry on a future LoadKey if the keyring
+		// later goes missing.
+		if err := DeleteKeyFile(); err != nil {
+			return "", fmt.Errorf("keyring write succeeded but failed to clear stale key file: %w", err)
+		}
 		return SourceKeyring, nil
-	} else if DefaultPassphraseFunc == nil {
-		return "", fmt.Errorf("OS keyring unavailable and no passphrase prompter configured: %w", err)
+	}
+	if DefaultPassphraseFunc == nil {
+		return "", fmt.Errorf("OS keyring unavailable and no passphrase prompter configured: %w", setErr)
+	}
+
+	// Keyring write failed → file fallback. First wipe any stale keyring
+	// entry; otherwise LoadKey (env → keyring → file) returns the OLD key
+	// while the new key sits in the file, silently breaking decryption.
+	if delErr := keyringDelete(keychainService, keychainAccount); delErr != nil &&
+		!errors.Is(delErr, keyring.ErrNotFound) {
+		return "", fmt.Errorf("keyring write failed and stale entry could not be cleared (set=%v, delete=%v); aborting to avoid stale-key shadow", setErr, delErr)
 	}
 
 	pp, err := DefaultPassphraseFunc(
@@ -66,7 +90,7 @@ func LoadKey() (*age.X25519Identity, string, error) {
 		return id, SourceEnv, nil
 	}
 
-	if secret, err := keyring.Get(keychainService, keychainAccount); err == nil {
+	if secret, err := keyringGet(keychainService, keychainAccount); err == nil {
 		id, err := ParseIdentity(secret)
 		if err != nil {
 			return nil, "", fmt.Errorf("parsing keyring key: %w", err)
@@ -105,7 +129,7 @@ func LoadPublicKey() (*age.X25519Recipient, string, error) {
 // DeleteKey removes the age private key from both the OS keyring and the
 // file fallback. Missing entries in either backend are ignored.
 func DeleteKey() error {
-	kErr := keyring.Delete(keychainService, keychainAccount)
+	kErr := keyringDelete(keychainService, keychainAccount)
 	if errors.Is(kErr, keyring.ErrNotFound) {
 		kErr = nil
 	}
