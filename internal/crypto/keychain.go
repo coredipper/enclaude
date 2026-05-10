@@ -63,7 +63,8 @@ func StoreKey(identity *age.X25519Identity) (string, error) {
 	// while the new key sits in the file, silently breaking decryption.
 	if delErr := keyringDelete(keychainService, keychainAccount); delErr != nil &&
 		!errors.Is(delErr, keyring.ErrNotFound) {
-		return "", fmt.Errorf("keyring write failed and stale entry could not be cleared (set=%v, delete=%v); aborting to avoid stale-key shadow", setErr, delErr)
+		return "", fmt.Errorf("keyring write failed and stale entry could not be cleared; aborting to avoid stale-key shadow: %w",
+			errors.Join(setErr, delErr))
 	}
 
 	pp, err := DefaultPassphraseFunc(
@@ -154,7 +155,10 @@ func DeleteKey() error {
 	case fErr == nil:
 		return kErr
 	default:
-		return fmt.Errorf("keyring: %v; file: %v", kErr, fErr)
+		return errors.Join(
+			fmt.Errorf("keyring: %w", kErr),
+			fmt.Errorf("file: %w", fErr),
+		)
 	}
 }
 

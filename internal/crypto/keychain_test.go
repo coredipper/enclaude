@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -191,6 +192,69 @@ func TestDeleteKey_RealKeyringErrorStillSurfaces(t *testing.T) {
 
 	if err := DeleteKey(); err == nil {
 		t.Fatal("expected error when keyring entry exists and Delete fails")
+	}
+}
+
+// TestStoreKey_FallbackAbortError_UnwrapsSetAndDeleteErrors guards the error
+// chain on the abort path. Both underlying errors must be reachable via
+// errors.Is so callers and log scrapers can act on the specific failure mode
+// (e.g. retry on transient D-Bus errors but not on permanent auth errors).
+func TestStoreKey_FallbackAbortError_UnwrapsSetAndDeleteErrors(t *testing.T) {
+	withTestEnv(t)
+
+	setErr := errors.New("simulated dbus blip")
+	delErr := errors.New("simulated delete blip")
+	keyringSet = func(service, user, pass string) error { return setErr }
+	keyringDelete = func(service, user string) error { return delErr }
+
+	id, _ := GenerateKey()
+	if _, err := StoreKey(id); err == nil {
+		t.Fatal("expected StoreKey to abort with combined error")
+	} else {
+		if !errors.Is(err, setErr) {
+			t.Fatalf("error chain missing setErr (%v): %v", setErr, err)
+		}
+		if !errors.Is(err, delErr) {
+			t.Fatalf("error chain missing delErr (%v): %v", delErr, err)
+		}
+	}
+}
+
+// TestDeleteKey_CombinedError_UnwrapsBothErrors guards the same property on
+// DeleteKey: when both backends fail, both underlying errors stay reachable.
+func TestDeleteKey_CombinedError_UnwrapsBothErrors(t *testing.T) {
+	withTestEnv(t)
+
+	// Force file-fallback delete to fail by pointing the path at a
+	// non-empty directory; os.Remove returns ENOTEMPTY (an *fs.PathError).
+	keyDir := t.TempDir()
+	badPath := filepath.Join(keyDir, "key.age.enc")
+	if err := os.Mkdir(badPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(badPath, "child"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write child: %v", err)
+	}
+	t.Setenv("ENCLAUDE_KEY_FILE", badPath)
+
+	// Seed keyring so DeleteKey actually attempts keyringDelete.
+	id, _ := GenerateKey()
+	if err := keyring.Set(keychainService, keychainAccount, id.String()); err != nil {
+		t.Fatalf("seed keyring: %v", err)
+	}
+	delErr := errors.New("keyring locked")
+	keyringDelete = func(service, user string) error { return delErr }
+
+	err := DeleteKey()
+	if err == nil {
+		t.Fatal("expected combined error from DeleteKey")
+	}
+	if !errors.Is(err, delErr) {
+		t.Fatalf("error chain missing keyring delErr: %v", err)
+	}
+	var pathErr *fs.PathError
+	if !errors.As(err, &pathErr) {
+		t.Fatalf("error chain missing *fs.PathError for file delete: %v", err)
 	}
 }
 
