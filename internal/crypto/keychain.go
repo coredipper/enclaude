@@ -127,12 +127,23 @@ func LoadPublicKey() (*age.X25519Recipient, string, error) {
 }
 
 // DeleteKey removes the age private key from both the OS keyring and the
-// file fallback. Missing entries in either backend are ignored.
+// file fallback. Missing entries in either backend are ignored, including
+// the case where the keyring backend itself is unavailable (headless Linux
+// without Secret Service) — there is nothing to delete there, so the file
+// fallback alone determines success.
 func DeleteKey() error {
-	kErr := keyringDelete(keychainService, keychainAccount)
-	if errors.Is(kErr, keyring.ErrNotFound) {
-		kErr = nil
+	var kErr error
+	// Probe the keyring first. Any error from Get (ErrNotFound or backend
+	// unavailable) means there is nothing for us to delete; skip Delete to
+	// avoid surfacing a backend-unavailable error on hosts where the file
+	// is the only real backend.
+	if _, getErr := keyringGet(keychainService, keychainAccount); getErr == nil {
+		if err := keyringDelete(keychainService, keychainAccount); err != nil &&
+			!errors.Is(err, keyring.ErrNotFound) {
+			kErr = err
+		}
 	}
+
 	fErr := DeleteKeyFile()
 
 	switch {

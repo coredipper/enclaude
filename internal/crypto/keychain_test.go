@@ -138,6 +138,62 @@ func TestStoreKey_KeyringSuccessClearsStaleFile(t *testing.T) {
 	}
 }
 
+// TestDeleteKey_FileOnlyHostIgnoresKeyringBackendError covers headless Linux:
+// keyring backend is unreachable (D-Bus error, not ErrNotFound), file is the
+// only real backend. DeleteKey must clear the file and return nil — the
+// keyring "missing entry" is whole-backend missing, semantically identical
+// to ErrNotFound for delete purposes.
+func TestDeleteKey_FileOnlyHostIgnoresKeyringBackendError(t *testing.T) {
+	withTestEnv(t)
+
+	// Simulate D-Bus / Secret Service unavailable. Anything that is not
+	// keyring.ErrNotFound exercises the regression path.
+	backendDown := errors.New("dbus: org.freedesktop.secrets not provided")
+	keyringGet = func(service, user string) (string, error) { return "", backendDown }
+
+	deleteCalled := false
+	keyringDelete = func(service, user string) error {
+		deleteCalled = true
+		return backendDown
+	}
+
+	// Seed file fallback (the only real backend on this host).
+	id, _ := GenerateKey()
+	if err := StoreKeyFile(id, "test-passphrase"); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	if err := DeleteKey(); err != nil {
+		t.Fatalf("DeleteKey returned error on file-only host: %v", err)
+	}
+	if KeyFileExists() {
+		t.Fatal("file fallback not deleted")
+	}
+	if deleteCalled {
+		t.Fatal("keyringDelete should not be called when Get reports backend unavailable")
+	}
+}
+
+// TestDeleteKey_RealKeyringErrorStillSurfaces ensures the relaxed contract
+// does not mask genuine failures: if the entry exists (Get succeeds) but
+// Delete fails, the error must propagate.
+func TestDeleteKey_RealKeyringErrorStillSurfaces(t *testing.T) {
+	withTestEnv(t)
+
+	id, _ := GenerateKey()
+	if err := keyring.Set(keychainService, keychainAccount, id.String()); err != nil {
+		t.Fatalf("seed keyring: %v", err)
+	}
+
+	keyringDelete = func(service, user string) error {
+		return errors.New("keyring locked")
+	}
+
+	if err := DeleteKey(); err == nil {
+		t.Fatal("expected error when keyring entry exists and Delete fails")
+	}
+}
+
 func TestLoadKey_NoKeySources(t *testing.T) {
 	withTestEnv(t)
 
