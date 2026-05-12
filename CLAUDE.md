@@ -89,10 +89,17 @@ using the ldflag path.
    changelog (`^docs:` / `^test:` filtered per `.goreleaser.yaml`),
    creates the GitHub release, and uploads the tarballs + `checksums.txt`.
 
-5. Optionally prepend a highlights section to the auto-generated notes:
+5. Optionally add a highlights section above the auto-generated notes.
+   `--notes` *replaces* the body, so to keep goreleaser's changelog you
+   have to fetch and re-include it:
 
    ```sh
-   gh release edit vX.Y.Z --notes "…"
+   existing=$(gh release view vX.Y.Z --json body -q .body)
+   gh release edit vX.Y.Z --notes "## Highlights
+
+   …
+
+   $existing"
    ```
 
 Known nit: goreleaser warns that `archives.format` is deprecated in
