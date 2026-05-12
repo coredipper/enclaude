@@ -199,6 +199,47 @@ func TestDeleteKey_RealKeyringErrorStillSurfaces(t *testing.T) {
 // chain on the abort path. Both underlying errors must be reachable via
 // errors.Is so callers and log scrapers can act on the specific failure mode
 // (e.g. retry on transient D-Bus errors but not on permanent auth errors).
+// TestStoreKey_KeyringSuccess_FileCleanupFailureIsWarning verifies that a
+// failure to delete the stale fallback file after a successful keyring write
+// does not fail StoreKey. LoadKey precedence (keyring > file) keeps the
+// system consistent — the stale file is shadowed by the fresh keyring entry
+// and is harmless — so reporting a hard error after a successful write would
+// just confuse the user.
+func TestStoreKey_KeyringSuccess_FileCleanupFailureIsWarning(t *testing.T) {
+	withTestEnv(t)
+
+	// Point ENCLAUDE_KEY_FILE at a non-empty directory so DeleteKeyFile
+	// (os.Remove) returns ENOTEMPTY.
+	keyDir := t.TempDir()
+	badPath := filepath.Join(keyDir, "key.age.enc")
+	if err := os.Mkdir(badPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(badPath, "child"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write child: %v", err)
+	}
+	t.Setenv("ENCLAUDE_KEY_FILE", badPath)
+
+	id, _ := GenerateKey()
+	source, err := StoreKey(id)
+	if err != nil {
+		t.Fatalf("StoreKey should succeed despite stale-file cleanup failure: %v", err)
+	}
+	if source != SourceKeyring {
+		t.Fatalf("source = %q, want %q", source, SourceKeyring)
+	}
+
+	// Verify keyring actually holds the new key — confirms the failure
+	// happened during cleanup, not during the keyring write.
+	secret, gerr := keyring.Get(keychainService, keychainAccount)
+	if gerr != nil {
+		t.Fatalf("keyring lookup after StoreKey: %v", gerr)
+	}
+	if secret != id.String() {
+		t.Fatal("keyring does not hold the stored key")
+	}
+}
+
 func TestStoreKey_FallbackAbortError_UnwrapsSetAndDeleteErrors(t *testing.T) {
 	withTestEnv(t)
 

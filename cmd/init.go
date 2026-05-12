@@ -160,11 +160,15 @@ This repository contains an encrypted backup of a Claude Code configuration
 directory, managed by [enclaude](https://github.com/coredipper/enclaude).
 
 All files are encrypted with [age](https://age-encryption.org/) and cannot be
-read without the private key stored in the OS keychain on the originating device.
+read without the private key. On the originating device the key is stored in
+the OS keyring (macOS Keychain, Windows Credential Manager, Linux Secret
+Service) or — on hosts without one, such as headless Linux — in a
+passphrase-encrypted key file under {TICK}$XDG_CONFIG_HOME/enclaude/{TICK}.
 
-> **Private keys are never stored here.** The age private key lives exclusively
-> in the OS keychain (and optionally in an encrypted backup file). Do not commit
-> private keys or unencrypted backups to this repository.
+> **Private keys are never stored here.** The age private key lives in the OS
+> keyring or a local passphrase-encrypted key file (plus, optionally, an
+> encrypted backup file inside this repository). Do not commit private keys or
+> unencrypted backups to this repository.
 
 ## Repository details
 
@@ -178,14 +182,16 @@ read without the private key stored in the OS keychain on the originating device
 1. Install enclaude.
 2. Clone this repository to {TICK}~/.enclaude/{TICK}:
    {TICK}git clone <remote-url> ~/.enclaude{TICK}
-3. Import your private key into the keychain:
+3. Import your private key (into the OS keyring if available, otherwise into
+   a local passphrase-encrypted key file):
    {TICK}enclaude key import{TICK}
 4. Decrypt and restore your Claude files:
    {TICK}enclaude unseal{TICK}
 
 ## Key recovery
 
-If the OS keychain entry is lost, restore from the passphrase-encrypted backup:
+If both the OS keyring entry and the local key file are lost, restore from the
+passphrase-encrypted backup committed to this repository:
 
 {FENCE}
 enclaude key recover key.age.backup

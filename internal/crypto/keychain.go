@@ -46,11 +46,16 @@ var DefaultPassphraseFunc PassphraseFunc
 func StoreKey(identity *age.X25519Identity) (string, error) {
 	setErr := keyringSet(keychainService, keychainAccount, identity.String())
 	if setErr == nil {
-		// Keyring now authoritative. Drop any stale file fallback so it
-		// cannot shadow this entry on a future LoadKey if the keyring
-		// later goes missing.
+		// Keyring now authoritative. Try to drop any stale file fallback
+		// so it cannot shadow this entry on a future LoadKey if the
+		// keyring later goes missing. Cleanup failure is non-fatal:
+		// LoadKey precedence (env → keyring → file) means the fresh
+		// keyring entry is what callers will see, and the stale file is
+		// harmless until that changes. Surface as a warning instead of
+		// failing a successful write.
 		if err := DeleteKeyFile(); err != nil {
-			return "", fmt.Errorf("keyring write succeeded but failed to clear stale key file: %w", err)
+			fmt.Fprintf(os.Stderr,
+				"warning: keyring write succeeded but failed to clear stale key file: %v\n", err)
 		}
 		return SourceKeyring, nil
 	}
