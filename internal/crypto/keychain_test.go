@@ -199,6 +199,27 @@ func TestDeleteKey_RealKeyringErrorStillSurfaces(t *testing.T) {
 // chain on the abort path. Both underlying errors must be reachable via
 // errors.Is so callers and log scrapers can act on the specific failure mode
 // (e.g. retry on transient D-Bus errors but not on permanent auth errors).
+func TestStoreKey_FallbackAbortError_UnwrapsSetAndDeleteErrors(t *testing.T) {
+	withTestEnv(t)
+
+	setErr := errors.New("simulated dbus blip")
+	delErr := errors.New("simulated delete blip")
+	keyringSet = func(service, user, pass string) error { return setErr }
+	keyringDelete = func(service, user string) error { return delErr }
+
+	id, _ := GenerateKey()
+	if _, err := StoreKey(id); err == nil {
+		t.Fatal("expected StoreKey to abort with combined error")
+	} else {
+		if !errors.Is(err, setErr) {
+			t.Fatalf("error chain missing setErr (%v): %v", setErr, err)
+		}
+		if !errors.Is(err, delErr) {
+			t.Fatalf("error chain missing delErr (%v): %v", delErr, err)
+		}
+	}
+}
+
 // TestStoreKey_KeyringSuccess_FileCleanupFailureIsWarning verifies that a
 // failure to delete the stale fallback file after a successful keyring write
 // does not fail StoreKey. LoadKey precedence (keyring > file) keeps the
@@ -237,27 +258,6 @@ func TestStoreKey_KeyringSuccess_FileCleanupFailureIsWarning(t *testing.T) {
 	}
 	if secret != id.String() {
 		t.Fatal("keyring does not hold the stored key")
-	}
-}
-
-func TestStoreKey_FallbackAbortError_UnwrapsSetAndDeleteErrors(t *testing.T) {
-	withTestEnv(t)
-
-	setErr := errors.New("simulated dbus blip")
-	delErr := errors.New("simulated delete blip")
-	keyringSet = func(service, user, pass string) error { return setErr }
-	keyringDelete = func(service, user string) error { return delErr }
-
-	id, _ := GenerateKey()
-	if _, err := StoreKey(id); err == nil {
-		t.Fatal("expected StoreKey to abort with combined error")
-	} else {
-		if !errors.Is(err, setErr) {
-			t.Fatalf("error chain missing setErr (%v): %v", setErr, err)
-		}
-		if !errors.Is(err, delErr) {
-			t.Fatalf("error chain missing delErr (%v): %v", delErr, err)
-		}
 	}
 }
 
