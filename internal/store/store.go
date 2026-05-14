@@ -198,6 +198,22 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 
 	stats.Total = len(manifest.Files)
 
+	restoreFiles(cfg, store, manifest, identity, verbose, progress, &stats)
+
+	// Delete managed files not in the manifest. The manifest is the source
+	// of truth — after git pull/merge, it reflects the intended state
+	// including remote deletions. Skip if restore had errors (incomplete
+	// unseal should not trigger deletions).
+	if stats.Errors > 0 {
+		return stats, nil
+	}
+
+	deleteOrphanedFiles(cfg, manifest, verbose, &stats)
+
+	return stats, nil
+}
+
+func restoreFiles(cfg *config.Config, store *ObjectStore, manifest *Manifest, identity age.Identity, verbose bool, progress ProgressFunc, stats *UnsealStats) {
 	i := 0
 	for relPath, entry := range manifest.Files {
 		i++
@@ -250,49 +266,41 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		}
 		stats.Restored++
 	}
+}
 
-	// Delete managed files not in the manifest. The manifest is the source
-	// of truth — after git pull/merge, it reflects the intended state
-	// including remote deletions. Skip if restore had errors (incomplete
-	// unseal should not trigger deletions).
-	if stats.Errors > 0 {
-		return stats, nil
-	}
+func deleteOrphanedFiles(cfg *config.Config, manifest *Manifest, verbose bool, stats *UnsealStats) {
 	existingFiles, scanErr := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 	if scanErr != nil {
 		if verbose {
 			fmt.Fprintf(os.Stderr, "  warning: skipping deletion (scan incomplete: %v)\n", scanErr)
 		}
 		stats.Errors++
-		return stats, nil
+		return
 	}
-	{
-		manifestPaths := make(map[string]bool, len(manifest.Files))
-		for relPath := range manifest.Files {
-			manifestPaths[relPath] = true
-		}
-		for _, f := range existingFiles {
-			if !manifestPaths[f.RelPath] {
-				if err := os.Remove(f.AbsPath); err == nil {
-					stats.Deleted++
-					if verbose {
-						fmt.Printf("  [delete] %s\n", f.RelPath)
-					}
-					dir := filepath.Dir(f.AbsPath)
-					if dir != cfg.Seal.ClaudeDir {
-						os.Remove(dir)
-					}
-				} else {
-					stats.Errors++
-					if verbose {
-						fmt.Fprintf(os.Stderr, "  warning: cannot delete %s: %v\n", f.RelPath, err)
-					}
+
+	manifestPaths := make(map[string]bool, len(manifest.Files))
+	for relPath := range manifest.Files {
+		manifestPaths[relPath] = true
+	}
+	for _, f := range existingFiles {
+		if !manifestPaths[f.RelPath] {
+			if err := os.Remove(f.AbsPath); err == nil {
+				stats.Deleted++
+				if verbose {
+					fmt.Printf("  [delete] %s\n", f.RelPath)
+				}
+				dir := filepath.Dir(f.AbsPath)
+				if dir != cfg.Seal.ClaudeDir {
+					os.Remove(dir)
+				}
+			} else {
+				stats.Errors++
+				if verbose {
+					fmt.Fprintf(os.Stderr, "  warning: cannot delete %s: %v\n", f.RelPath, err)
 				}
 			}
 		}
 	}
-
-	return stats, nil
 }
 
 
