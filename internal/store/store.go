@@ -151,12 +151,12 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		}
 
 		manifest.Files[f.RelPath] = FileEntry{
-			ContentHash:    hash,
-			SizePlaintext:  f.Size,
-			SizeEncrypted:  int64(len(encrypted)),
-			Mtime:          time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
-			MergeStrategy:  ResolveMergeStrategy(f.RelPath, cfg.Merge),
-			JSONLLineCount: lineCount,
+			ContentHash:     hash,
+			SizePlaintext:   f.Size,
+			SizeEncrypted:   int64(len(encrypted)),
+			Mtime:           time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
+			MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
+			JSONLLineCount:  lineCount,
 			SessionComplete: isSessionComplete(f.RelPath),
 		}
 	}
@@ -294,7 +294,6 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 
 	return stats, nil
 }
-
 
 // Status returns the diff between the current claude directory and the seal manifest.
 func Status(cfg *config.Config) (*DiffResult, error) {

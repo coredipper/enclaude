@@ -233,9 +233,9 @@ func TestManifestDiff(t *testing.T) {
 	}
 	new := &Manifest{
 		Files: map[string]FileEntry{
-			"a.txt": {ContentHash: "hash1"},   // unchanged
-			"b.txt": {ContentHash: "hash2b"},  // modified
-			"d.txt": {ContentHash: "hash4"},   // added
+			"a.txt": {ContentHash: "hash1"},  // unchanged
+			"b.txt": {ContentHash: "hash2b"}, // modified
+			"d.txt": {ContentHash: "hash4"},  // added
 		},
 	}
 
