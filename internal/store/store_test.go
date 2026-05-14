@@ -198,6 +198,75 @@ func TestUnsealDeletesRemovedFiles(t *testing.T) {
 	}
 }
 
+// TestSealPopulatesByteCountersAndSessionTracked verifies the new
+// fields surfaced in the sync output: bytes processed and session
+// JSONL counts. Both depend on the per-file FileEntry data we already
+// gather — these assertions pin that they reach SealStats.
+func TestSealPopulatesByteCountersAndSessionTracked(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	stats, err := Seal(cfg, identity.Recipient(), false, nil)
+	if err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+	if stats.BytesPlaintext <= 0 {
+		t.Errorf("BytesPlaintext should be > 0 after first seal, got %d", stats.BytesPlaintext)
+	}
+	if stats.BytesEncrypted <= 0 {
+		t.Errorf("BytesEncrypted should be > 0 after first seal, got %d", stats.BytesEncrypted)
+	}
+	// setupTestDir creates two session JSONLs under projects/proj-a/.
+	if stats.Sessions.Tracked < 2 {
+		t.Errorf("Sessions.Tracked: want >= 2 from test fixture, got %d", stats.Sessions.Tracked)
+	}
+	if stats.Sessions.New != stats.Sessions.Tracked {
+		t.Errorf("Sessions.New on first seal should equal Tracked (%d), got %d",
+			stats.Sessions.Tracked, stats.Sessions.New)
+	}
+	if stats.Elapsed <= 0 {
+		t.Errorf("Elapsed should be set, got %v", stats.Elapsed)
+	}
+}
+
+// TestSealCountsUpdatedSessions exercises the "Sessions.Updated" counter:
+// growing an existing session JSONL between two seals should show up as
+// exactly one update.
+func TestSealCountsUpdatedSessions(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("initial seal: %v", err)
+	}
+
+	// Append a second JSONL record to an existing session transcript.
+	sessionPath := filepath.Join(claudeDir, "projects", "proj-a", "abc123.jsonl")
+	f, err := os.OpenFile(sessionPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("open session for append: %v", err)
+	}
+	f.WriteString("\n" + `{"type":"assistant","content":"hi"}` + "\n")
+	f.Close()
+
+	stats, err := Seal(cfg, identity.Recipient(), false, nil)
+	if err != nil {
+		t.Fatalf("second seal: %v", err)
+	}
+	if stats.Sessions.New != 0 {
+		t.Errorf("Sessions.New: want 0 on incremental seal, got %d", stats.Sessions.New)
+	}
+	if stats.Sessions.Updated != 1 {
+		t.Errorf("Sessions.Updated: want 1 (the appended file), got %d", stats.Sessions.Updated)
+	}
+}
+
 func TestUnsealDoesNotDeleteUnmanagedFiles(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()

@@ -1,9 +1,13 @@
 package gitops
 
 import (
+	"bytes"
 	"fmt"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Git wraps git CLI operations for a repository.
@@ -11,16 +15,47 @@ type Git struct {
 	dir string
 }
 
+// PullStats summarizes a pull's effect on the local branch.
+type PullStats struct {
+	Commits      int
+	FilesChanged int
+	UpToDate     bool
+	Elapsed      time.Duration
+}
+
+// PushStats summarizes a push's transfer to the remote.
+type PushStats struct {
+	Commits int
+	Objects int
+	Bytes   int64
+	NoOp    bool
+	Elapsed time.Duration
+}
+
 // New creates a Git instance for the given repo directory.
 func New(repoDir string) *Git {
 	return &Git{dir: repoDir}
 }
 
-// run executes a git command and returns combined output.
+// run executes a git command and returns combined output. Use this for
+// user-facing diagnostics where interleaved stdout/stderr is acceptable.
 func (g *Git) run(args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", g.dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
+}
+
+// runSeparate executes a git command with stdout/stderr split, ANSI color
+// suppressed so output is parseable regardless of user `color.ui` config.
+// Use this for any path that parses git's output.
+func (g *Git) runSeparate(args ...string) (stdout, stderr string, err error) {
+	full := append([]string{"-C", g.dir, "-c", "color.ui=never"}, args...)
+	cmd := exec.Command("git", full...)
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	return strings.TrimSpace(outBuf.String()), strings.TrimSpace(errBuf.String()), err
 }
 
 // Init initializes a new git repository.
@@ -53,14 +88,54 @@ func (g *Git) HasChanges() bool {
 	return out != ""
 }
 
-// Push pushes to the given remote and branch.
-func (g *Git) Push(remote, branch string) (string, error) {
-	return g.run("push", remote, branch)
+// Push pushes to the given remote and branch and returns transfer stats
+// alongside the human-readable combined output.
+func (g *Git) Push(remote, branch string) (PushStats, string, error) {
+	return g.pushWithArgs(remote, branch, false)
 }
 
-// PushWithUpstream pushes and sets upstream tracking.
-func (g *Git) PushWithUpstream(remote, branch string) (string, error) {
-	return g.run("push", "-u", remote, branch)
+// PushWithUpstream pushes, sets upstream tracking, and returns transfer stats.
+func (g *Git) PushWithUpstream(remote, branch string) (PushStats, string, error) {
+	return g.pushWithArgs(remote, branch, true)
+}
+
+// pushWithArgs runs `git push --porcelain` (optionally with -u) and rolls
+// the porcelain stdout + transfer-progress stderr into PushStats. The
+// returned string is the combined output the caller should surface on
+// error or in verbose mode.
+func (g *Git) pushWithArgs(remote, branch string, setUpstream bool) (PushStats, string, error) {
+	start := time.Now()
+	stats := PushStats{}
+
+	// Count commits the remote is missing before the push. With no upstream
+	// yet the symbolic ref @{u} is undefined, so we count from the empty tree.
+	commits := 0
+	if g.HasUpstream() {
+		if out, _, err := g.runSeparate("rev-list", "--count", "@{u}..HEAD"); err == nil {
+			commits, _ = strconv.Atoi(strings.TrimSpace(out))
+		}
+	} else {
+		if out, _, err := g.runSeparate("rev-list", "--count", "HEAD"); err == nil {
+			commits, _ = strconv.Atoi(strings.TrimSpace(out))
+		}
+	}
+	stats.Commits = commits
+
+	args := []string{"push", "--porcelain"}
+	if setUpstream {
+		args = append(args, "-u")
+	}
+	args = append(args, remote, branch)
+
+	stdout, stderr, err := g.runSeparate(args...)
+	combined := joinStreams(stdout, stderr)
+	stats.NoOp = parsePorcelainNoOp(stdout)
+	stats.Objects, stats.Bytes = parsePushTransfer(stderr)
+	if stats.NoOp {
+		stats.Commits = 0
+	}
+	stats.Elapsed = time.Since(start)
+	return stats, combined, err
 }
 
 // Fetch fetches from the given remote.
@@ -68,9 +143,43 @@ func (g *Git) Fetch(remote string) (string, error) {
 	return g.run("fetch", remote)
 }
 
-// Pull pulls from the given remote and branch.
-func (g *Git) Pull(remote, branch string) (string, error) {
-	return g.run("pull", remote, branch)
+// Pull pulls from the given remote and branch and returns a PullStats
+// summary plus the combined output (which the merge driver parser also
+// consumes for [enclaude-merge] lines on stderr).
+func (g *Git) Pull(remote, branch string) (PullStats, string, error) {
+	start := time.Now()
+	stats := PullStats{}
+
+	oldHead, _, _ := g.runSeparate("rev-parse", "HEAD")
+	oldHead = strings.TrimSpace(oldHead)
+
+	// We keep the legacy `run` (CombinedOutput) here for two reasons:
+	// callers rely on the "CONFLICT" / "Already up to date" substrings in
+	// the human-friendly form, and the merge driver's stderr arrives
+	// interleaved with stdout — both ends up in the same string for the
+	// parser. Color is suppressed via -c flags.
+	cmd := exec.Command("git", append([]string{"-C", g.dir, "-c", "color.ui=never", "pull"}, remote, branch)...)
+	rawOut, err := cmd.CombinedOutput()
+	out := strings.TrimSpace(string(rawOut))
+
+	if strings.Contains(out, "Already up to date") {
+		stats.UpToDate = true
+		stats.Elapsed = time.Since(start)
+		return stats, out, err
+	}
+
+	if oldHead != "" {
+		if cnt, _, e := g.runSeparate("rev-list", "--count", oldHead+"..HEAD"); e == nil {
+			stats.Commits, _ = strconv.Atoi(strings.TrimSpace(cnt))
+		}
+		if stats.Commits > 0 {
+			if diffOut, _, e := g.runSeparate("diff", "--shortstat", oldHead, "HEAD"); e == nil {
+				stats.FilesChanged = parseShortstatFiles(diffOut)
+			}
+		}
+	}
+	stats.Elapsed = time.Since(start)
+	return stats, out, err
 }
 
 // Merge merges the given ref into the current branch.
@@ -137,7 +246,7 @@ func (g *Git) HasRemote(name string) bool {
 	if err != nil {
 		return false
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.TrimSpace(line) == name {
 			return true
 		}
@@ -160,4 +269,85 @@ func (g *Git) ShowFileAtRef(ref, path string) (string, error) {
 func (g *Git) Checkout(ref string, paths ...string) (string, error) {
 	args := append([]string{"checkout", ref, "--"}, paths...)
 	return g.run(args...)
+}
+
+// joinStreams concatenates stdout and stderr into the user-facing combined
+// output. Empty streams are skipped so callers don't see leading/trailing
+// blank lines when only one side produced anything.
+func joinStreams(stdout, stderr string) string {
+	switch {
+	case stdout == "":
+		return stderr
+	case stderr == "":
+		return stdout
+	default:
+		return stdout + "\n" + stderr
+	}
+}
+
+// parsePorcelainNoOp returns true if `git push --porcelain` reports that
+// every ref was already up-to-date. Porcelain output starts with one-char
+// flag tokens; `=` signals "up-to-date".
+func parsePorcelainNoOp(stdout string) bool {
+	if stdout == "" {
+		return false
+	}
+	for line := range strings.SplitSeq(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		// Skip header ("To <url>") and trailer ("Done").
+		if line == "" || line == "Done" || strings.HasPrefix(line, "To ") {
+			continue
+		}
+		if !strings.HasPrefix(line, "=") {
+			return false
+		}
+	}
+	return true
+}
+
+// pushTotalRE matches the "Total %d (delta ...)" line git emits on push.
+var pushTotalRE = regexp.MustCompile(`Total (\d+)`)
+
+// pushBytesRE matches the human bytes counter inside the progress line,
+// e.g. "Writing objects: 100% (9/9), 412.00 KiB | ...".
+var pushBytesRE = regexp.MustCompile(`([\d.]+)\s*(B|KiB|MiB|GiB)\b`)
+
+// parsePushTransfer extracts object count and transferred-bytes estimate
+// from the push command's stderr. Both fields are best-effort — git's
+// progress wording varies by version and may be absent for empty pushes.
+func parsePushTransfer(stderr string) (objects int, bts int64) {
+	if m := pushTotalRE.FindStringSubmatch(stderr); len(m) == 2 {
+		objects, _ = strconv.Atoi(m[1])
+	}
+	if m := pushBytesRE.FindStringSubmatch(stderr); len(m) == 3 {
+		f, err := strconv.ParseFloat(m[1], 64)
+		if err == nil {
+			switch m[2] {
+			case "B":
+				bts = int64(f)
+			case "KiB":
+				bts = int64(f * 1024)
+			case "MiB":
+				bts = int64(f * 1024 * 1024)
+			case "GiB":
+				bts = int64(f * 1024 * 1024 * 1024)
+			}
+		}
+	}
+	return objects, bts
+}
+
+// shortstatFilesRE matches the leading "N file(s) changed" segment of
+// `git diff --shortstat`. We avoid the localized word "file(s) changed"
+// and rely on the leading digit run.
+var shortstatFilesRE = regexp.MustCompile(`^\s*(\d+)\s+file`)
+
+// parseShortstatFiles returns the file count from `git diff --shortstat`
+// output, or 0 if the format wasn't recognized.
+func parseShortstatFiles(s string) int {
+	if m := shortstatFilesRE.FindStringSubmatch(s); len(m) == 2 {
+		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	return 0
 }

@@ -57,7 +57,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 	if stats.Errors > 0 {
 		return fmt.Errorf("seal had %d errors — resolve before pushing", stats.Errors)
 	}
-	fmt.Printf("  %s\n", stats)
+	fmt.Println(stats.Multiline("  "))
 
 	if stats.HasChanges() {
 		if err := git.AddAll(); err != nil {
@@ -74,16 +74,17 @@ func runPush(cmd *cobra.Command, args []string) error {
 	branch, _ := git.CurrentBranch()
 	fmt.Printf("Pushing to %s/%s...\n", remote, branch)
 
-	var out string
+	var pushStats gitops.PushStats
+	var pushOut string
 	if git.HasUpstream() {
-		out, err = git.Push(remote, branch)
+		pushStats, pushOut, err = git.Push(remote, branch)
 	} else {
-		out, err = git.PushWithUpstream(remote, branch)
+		pushStats, pushOut, err = git.PushWithUpstream(remote, branch)
 	}
 	if err != nil {
-		return fmt.Errorf("push failed: %w\n%s", err, out)
+		return fmt.Errorf("push failed: %w\n%s", err, pushOut)
 	}
 
-	fmt.Println("  Pushed successfully.")
+	fmt.Println(formatPushLine("  ", pushStats))
 	return nil
 }
