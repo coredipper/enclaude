@@ -6,13 +6,13 @@ import (
 
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
-	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/coredipper/enclaude/internal/store"
+	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 var (
-	repairCheck        bool
+	repairCheck         bool
 	repairDeleteOrphans bool
 )
 

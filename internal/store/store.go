@@ -37,6 +37,74 @@ func (s SealStats) String() string {
 		s.Scanned, s.Added, s.Modified, s.Unchanged)
 }
 
+func processFile(f ScanResult, store *ObjectStore, manifest *Manifest, recipient age.Recipient, mergeCfg map[string]string, verbose bool, stats *SealStats) {
+	plaintext, err := os.ReadFile(f.AbsPath)
+	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "  warning: cannot read %s: %v\n", f.RelPath, err)
+		}
+		stats.Errors++
+		return
+	}
+
+	hash := ContentHash(plaintext)
+
+	// Check if unchanged
+	if existing, ok := manifest.Files[f.RelPath]; ok && existing.ContentHash == hash {
+		stats.Unchanged++
+		return
+	}
+
+	// Encrypt and store
+	encrypted, err := crypto.Encrypt(plaintext, recipient)
+	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "  warning: cannot encrypt %s: %v\n", f.RelPath, err)
+		}
+		stats.Errors++
+		return
+	}
+
+	if err := store.Write(hash, encrypted); err != nil {
+		stats.Errors++
+		return
+	}
+
+	// Determine if this is new or modified
+	if _, existed := manifest.Files[f.RelPath]; existed {
+		stats.Modified++
+	} else {
+		stats.Added++
+	}
+
+	if verbose {
+		action := "new"
+		if _, existed := manifest.Files[f.RelPath]; existed {
+			action = "mod"
+		}
+		fmt.Printf("  [%s] %s (%s)\n", action, f.RelPath, FormatSize(f.Size))
+	}
+
+	// Count JSONL lines if applicable
+	lineCount := 0
+	if strings.HasSuffix(f.RelPath, ".jsonl") {
+		lineCount = bytes.Count(plaintext, []byte("\n"))
+		if len(plaintext) > 0 && plaintext[len(plaintext)-1] != '\n' {
+			lineCount++ // last line without trailing newline
+		}
+	}
+
+	manifest.Files[f.RelPath] = FileEntry{
+		ContentHash:     hash,
+		SizePlaintext:   f.Size,
+		SizeEncrypted:   int64(len(encrypted)),
+		Mtime:           time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
+		MergeStrategy:   ResolveMergeStrategy(f.RelPath, mergeCfg),
+		JSONLLineCount:  lineCount,
+		SessionComplete: isSessionComplete(f.RelPath),
+	}
+}
+
 // UnsealStats tracks what happened during an unseal operation.
 type UnsealStats struct {
 	Total     int
@@ -94,71 +162,7 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		}
 		seen[f.RelPath] = true
 
-		plaintext, err := os.ReadFile(f.AbsPath)
-		if err != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: cannot read %s: %v\n", f.RelPath, err)
-			}
-			stats.Errors++
-			continue
-		}
-
-		hash := ContentHash(plaintext)
-
-		// Check if unchanged
-		if existing, ok := manifest.Files[f.RelPath]; ok && existing.ContentHash == hash {
-			stats.Unchanged++
-			continue
-		}
-
-		// Encrypt and store
-		encrypted, err := crypto.Encrypt(plaintext, recipient)
-		if err != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: cannot encrypt %s: %v\n", f.RelPath, err)
-			}
-			stats.Errors++
-			continue
-		}
-
-		if err := store.Write(hash, encrypted); err != nil {
-			stats.Errors++
-			continue
-		}
-
-		// Determine if this is new or modified
-		if _, existed := manifest.Files[f.RelPath]; existed {
-			stats.Modified++
-		} else {
-			stats.Added++
-		}
-
-		if verbose {
-			action := "new"
-			if _, existed := manifest.Files[f.RelPath]; existed {
-				action = "mod"
-			}
-			fmt.Printf("  [%s] %s (%s)\n", action, f.RelPath, FormatSize(f.Size))
-		}
-
-		// Count JSONL lines if applicable
-		lineCount := 0
-		if strings.HasSuffix(f.RelPath, ".jsonl") {
-			lineCount = bytes.Count(plaintext, []byte("\n"))
-			if len(plaintext) > 0 && plaintext[len(plaintext)-1] != '\n' {
-				lineCount++ // last line without trailing newline
-			}
-		}
-
-		manifest.Files[f.RelPath] = FileEntry{
-			ContentHash:    hash,
-			SizePlaintext:  f.Size,
-			SizeEncrypted:  int64(len(encrypted)),
-			Mtime:          time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
-			MergeStrategy:  ResolveMergeStrategy(f.RelPath, cfg.Merge),
-			JSONLLineCount: lineCount,
-			SessionComplete: isSessionComplete(f.RelPath),
-		}
+		processFile(f, store, manifest, recipient, cfg.Merge, verbose, &stats)
 	}
 
 	// Mark deleted files
@@ -294,7 +298,6 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 
 	return stats, nil
 }
-
 
 // Status returns the diff between the current claude directory and the seal manifest.
 func Status(cfg *config.Config) (*DiffResult, error) {

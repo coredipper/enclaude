@@ -45,8 +45,8 @@ func shellQuote(s string) string {
 
 // hookEntry matches Claude Code's hook config structure.
 type hookEntry struct {
-	Matcher string     `json:"matcher,omitempty"`
-	Hooks   []hookDef  `json:"hooks"`
+	Matcher string    `json:"matcher,omitempty"`
+	Hooks   []hookDef `json:"hooks"`
 }
 
 type hookDef struct {
