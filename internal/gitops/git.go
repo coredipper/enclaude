@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -123,11 +124,29 @@ func (g *Git) LogFull(n int) (string, error) {
 }
 
 // ConfigMergeDriver registers a custom merge driver.
-func (g *Git) ConfigMergeDriver(name, driverCmd string) error {
+func (g *Git) ConfigMergeDriver(name string, driverArgs []string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("getting executable path: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("'" + strings.ReplaceAll(exe, "'", "'\\''") + "'")
+	for _, arg := range driverArgs {
+		sb.WriteString(" ")
+		// Git special tokens should not be quoted so they are expanded by git
+		if arg == "%O" || arg == "%A" || arg == "%B" || arg == "%L" || arg == "%P" {
+			sb.WriteString(arg)
+		} else {
+			sb.WriteString("'" + strings.ReplaceAll(arg, "'", "'\\''") + "'")
+		}
+	}
+	driverCmd := sb.String()
+
 	if _, err := g.run("config", fmt.Sprintf("merge.%s.name", name), "Claude Seal "+name+" merge"); err != nil {
 		return err
 	}
-	_, err := g.run("config", fmt.Sprintf("merge.%s.driver", name), driverCmd)
+	_, err = g.run("config", fmt.Sprintf("merge.%s.driver", name), driverCmd)
 	return err
 }
 
