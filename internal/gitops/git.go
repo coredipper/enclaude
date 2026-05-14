@@ -130,6 +130,8 @@ func (g *Git) ConfigMergeDriver(name string, driverArgs []string) error {
 		return fmt.Errorf("getting executable path: %w", err)
 	}
 
+	// Note: os.Executable() on Linux can return a path under /proc/self/exe if unlinked
+	// Note: POSIX single-quote escape won't work natively on Windows cmd.exe without bash
 	var sb strings.Builder
 	sb.WriteString("'" + strings.ReplaceAll(exe, "'", "'\\''") + "'")
 	for _, arg := range driverArgs {
