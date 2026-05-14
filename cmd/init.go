@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/store"
@@ -71,24 +72,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Create passphrase-encrypted backup
-	fmt.Println()
-	passphrase, err := ui.ReadPassphraseOptional("Enter backup passphrase (for key recovery, blank to skip): ")
-	if err != nil {
-		return fmt.Errorf("reading backup passphrase: %w", err)
-	}
-
-	if passphrase != "" {
-		backup, err := crypto.EncryptWithPassphrase([]byte(identity.String()), passphrase)
-		if err != nil {
-			return fmt.Errorf("creating key backup: %w", err)
-		}
-		backupPath := filepath.Join(sealDir, "key.age.backup")
-		if err := os.WriteFile(backupPath, backup, 0600); err != nil {
-			return fmt.Errorf("writing key backup: %w", err)
-		}
-		fmt.Println("  Key backup saved.")
-	} else {
-		fmt.Println("  Skipping backup (no passphrase entered).")
+	if err := createKeyBackup(sealDir, identity); err != nil {
+		return err
 	}
 
 	// 5. Write default config
@@ -208,6 +193,30 @@ enclaude pull          # pull and decrypt latest
 enclaude status        # show unsealed changes not yet sealed
 {FENCE}
 `
+
+func createKeyBackup(sealDir string, identity *age.X25519Identity) error {
+	fmt.Println()
+	passphrase, err := ui.ReadPassphraseOptional("Enter backup passphrase (for key recovery, blank to skip): ")
+	if err != nil {
+		return fmt.Errorf("reading backup passphrase: %w", err)
+	}
+
+	if passphrase != "" {
+		backup, err := crypto.EncryptWithPassphrase([]byte(identity.String()), passphrase)
+		if err != nil {
+			return fmt.Errorf("creating key backup: %w", err)
+		}
+		backupPath := filepath.Join(sealDir, "key.age.backup")
+		if err := os.WriteFile(backupPath, backup, 0600); err != nil {
+			return fmt.Errorf("writing key backup: %w", err)
+		}
+		fmt.Println("  Key backup saved.")
+	} else {
+		fmt.Println("  Skipping backup (no passphrase entered).")
+	}
+
+	return nil
+}
 
 func buildReadme(publicKey, deviceID string) string {
 	return strings.NewReplacer(
