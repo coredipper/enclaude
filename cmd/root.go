@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -65,4 +67,29 @@ func getSealDir() string {
 		os.Exit(1)
 	}
 	return home + "/.enclaude"
+}
+
+// setupSyncCmd encapsulates common initialization for pull, push, and sync commands.
+func setupSyncCmd(args []string) (*config.Config, *gitops.Git, string, error) {
+	sealDir := getSealDir()
+	remote := "origin"
+	if len(args) > 0 {
+		remote = args[0]
+	}
+
+	cfg, err := config.Load(sealDir)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if flagClaudeDir != "" {
+		cfg.Seal.ClaudeDir = flagClaudeDir
+	}
+
+	git := gitops.New(sealDir)
+
+	if !git.HasRemote(remote) {
+		return nil, nil, "", fmt.Errorf("remote '%s' not configured. Run: enclaude remote add %s <url>", remote, remote)
+	}
+
+	return cfg, git, remote, nil
 }

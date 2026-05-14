@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
-	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -23,24 +21,9 @@ func init() {
 }
 
 func runPull(cmd *cobra.Command, args []string) error {
-	sealDir := getSealDir()
-	remote := "origin"
-	if len(args) > 0 {
-		remote = args[0]
-	}
-
-	cfg, err := config.Load(sealDir)
+	cfg, git, remote, err := setupSyncCmd(args)
 	if err != nil {
 		return err
-	}
-	if flagClaudeDir != "" {
-		cfg.Seal.ClaudeDir = flagClaudeDir
-	}
-
-	git := gitops.New(sealDir)
-
-	if !git.HasRemote(remote) {
-		return fmt.Errorf("remote '%s' not configured", remote)
 	}
 
 	// Seal local changes first (commit before merge)
