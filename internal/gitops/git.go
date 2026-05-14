@@ -55,27 +55,27 @@ func (g *Git) HasChanges() bool {
 
 // Push pushes to the given remote and branch.
 func (g *Git) Push(remote, branch string) (string, error) {
-	return g.run("push", remote, branch)
+	return g.run("push", "--", remote, branch)
 }
 
 // PushWithUpstream pushes and sets upstream tracking.
 func (g *Git) PushWithUpstream(remote, branch string) (string, error) {
-	return g.run("push", "-u", remote, branch)
+	return g.run("push", "-u", "--", remote, branch)
 }
 
 // Fetch fetches from the given remote.
 func (g *Git) Fetch(remote string) (string, error) {
-	return g.run("fetch", remote)
+	return g.run("fetch", "--", remote)
 }
 
 // Pull pulls from the given remote and branch.
 func (g *Git) Pull(remote, branch string) (string, error) {
-	return g.run("pull", remote, branch)
+	return g.run("pull", "--", remote, branch)
 }
 
 // Merge merges the given ref into the current branch.
 func (g *Git) Merge(ref string) (string, error) {
-	return g.run("merge", ref)
+	return g.run("merge", "--", ref)
 }
 
 // MergeAbort aborts a merge in progress.
