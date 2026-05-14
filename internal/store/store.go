@@ -695,6 +695,11 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 
 	store := NewObjectStore(cfg.Seal.SealDir)
 
+	// Mirror Seal's PID-aware completion check so a Repair doesn't
+	// silently flip SessionComplete=true on currently-active session
+	// transcripts.
+	activeSessions := activeSessionIDs(cfg.Seal.ClaudeDir)
+
 	// Track old hashes that get superseded during repair so we can
 	// include them in orphan deletion (they become orphaned only after
 	// the manifest is updated with new hashes).
@@ -740,7 +745,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 				entry.JSONLLineCount++
 			}
 		}
-		entry.SessionComplete = isSessionCompleteFor(path, nil)
+		entry.SessionComplete = isSessionCompleteFor(path, activeSessions)
 		manifest.Files[path] = entry
 
 		result.Fixed++
