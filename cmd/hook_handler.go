@@ -72,7 +72,7 @@ func handleSessionStart() error {
 		git := gitops.New(sealDir)
 		if git.HasRemote("origin") {
 			branch, _ := git.CurrentBranch()
-			if out, err := git.Pull("origin", branch); err != nil {
+			if _, out, err := git.Pull("origin", branch); err != nil {
 				logHook("pull warning: %v (%s)", err, out)
 				// Don't fail — proceed with local state
 			}
@@ -154,7 +154,7 @@ func handleSessionEnd() error {
 		// Push if auto-push enabled
 		if cfg.Sync.AutoPush && git.HasRemote("origin") {
 			branch, _ := git.CurrentBranch()
-			if out, err := git.Push("origin", branch); err != nil {
+			if _, out, err := git.Push("origin", branch); err != nil {
 				logHook("push warning: %v (%s)", err, out)
 			}
 		}

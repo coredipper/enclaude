@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -131,6 +132,7 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 		// If not, prefer ours (shouldn't happen for completed sessions).
 		if strategy == merge.Immutable {
 			merged.Files[path] = oursEntry
+			emitMergeEvent(string(strategy), path, nil)
 			continue
 		}
 
@@ -193,16 +195,20 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 			continue
 		}
 
+		mergedLineCount := countLines(mergedContent)
 		merged.Files[path] = sealstore.FileEntry{
 			ContentHash:    mergedHash,
 			SizePlaintext:  int64(len(mergedContent)),
 			SizeEncrypted:  int64(len(mergedEncrypted)),
 			Mtime:          time.Now().UTC().Format(time.RFC3339),
 			MergeStrategy:  string(strategy),
-			JSONLLineCount: oursEntry.JSONLLineCount + theirsEntry.JSONLLineCount, // approximate
+			JSONLLineCount: mergedLineCount,
 		}
 
-		if flagVerbose || true { // always show merge activity
+		event := mergeEvent(string(strategy), mergedLineCount, mergedContent, oursPlain, theirsPlain)
+		emitMergeEvent(string(strategy), path, event)
+
+		if flagVerbose {
 			fmt.Fprintf(os.Stderr, "  [merge:%s] %s\n", strategy, path)
 		}
 	}
@@ -224,4 +230,78 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 	}
 
 	return nil
+}
+
+// countLines returns the number of JSONL records in content. We treat any
+// terminating newline as a record separator so an empty file is 0.
+func countLines(content []byte) int {
+	if len(content) == 0 {
+		return 0
+	}
+	n := bytes.Count(content, []byte("\n"))
+	if content[len(content)-1] != '\n' {
+		n++
+	}
+	return n
+}
+
+// mergeEvent builds the strategy-specific key/value fragment that gets
+// appended to a `[enclaude-merge]` stderr line. Returning nil omits the
+// counters (used for immutable, where there's nothing to report).
+func mergeEvent(strategy string, mergedLines int, mergedContent, oursPlain, theirsPlain []byte) map[string]int {
+	switch strategy {
+	case string(merge.JSONLDedup):
+		// Re-derive line counts from the actual decrypted bytes — manifest
+		// JSONLLineCount can lag if entries pre-date the line-counting
+		// behavior, so trust content for the dedup math.
+		oursActual := countLines(oursPlain)
+		theirsActual := countLines(theirsPlain)
+		return map[string]int{
+			"ours":    oursActual,
+			"theirs":  theirsActual,
+			"merged":  mergedLines,
+			"deduped": max(oursActual+theirsActual-mergedLines, 0),
+		}
+	case string(merge.SessionsIndex):
+		oursCount := sessionsIndexEntryCount(oursPlain)
+		theirsCount := sessionsIndexEntryCount(theirsPlain)
+		mergedCount := sessionsIndexEntryCount(mergedContent)
+		return map[string]int{
+			"sessions_added":   max(mergedCount-oursCount, 0),
+			"sessions_deduped": max(oursCount+theirsCount-mergedCount, 0),
+		}
+	default:
+		return nil
+	}
+}
+
+// sessionsIndexEntryCount returns len(entries) from a sessions-index.json
+// blob. Malformed input returns 0; callers treat that as "no signal".
+func sessionsIndexEntryCount(data []byte) int {
+	if len(data) == 0 {
+		return 0
+	}
+	var obj struct {
+		Entries []json.RawMessage `json:"entries"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return 0
+	}
+	return len(obj.Entries)
+}
+
+// emitMergeEvent writes a single structured `[enclaude-merge]` line to
+// stderr. The format is intentionally minimal and stable — see
+// internal/merge/parse.go for the consumer.
+func emitMergeEvent(strategy, path string, fields map[string]int) {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "[enclaude-merge] strategy=%s path=%s", strategy, path)
+	// Emit in a stable order so tests don't depend on map iteration.
+	for _, k := range []string{"ours", "theirs", "merged", "deduped", "sessions_added", "sessions_deduped"} {
+		if v, ok := fields[k]; ok {
+			fmt.Fprintf(&b, " %s=%d", k, v)
+		}
+	}
+	b.WriteByte('\n')
+	os.Stderr.Write(b.Bytes())
 }
