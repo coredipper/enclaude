@@ -3,6 +3,7 @@ package gitops
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -44,20 +45,19 @@ func TestGitOptionInjectionMitigation(t *testing.T) {
 		if err := os.WriteFile(dashedFile, []byte("test"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		// If '--' is missing, `git add -f` would interpret -f as force, and wait for pathspec,
-		// failing with "Nothing specified, nothing added." or similar, or adding without treating '-f' as a file.
+
 		err := baseGit.Add("-f")
 		if err != nil {
 			t.Fatalf("Add failed, possibly interpreted as flag: %v", err)
 		}
 
-		// Verify '-f' is actually added
+		// Verify '-f' is actually added by checking git status
 		out, err := baseGit.run("status", "--porcelain")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if out == "" || out[len(out)-2:] != "-f" {
-			// Not perfectly robust, but good enough to see if it added something named '-f'
+		if !strings.Contains(out, "A  -f") {
+			t.Errorf("Expected dashed file to be added, got status: %q", out)
 		}
 	})
 
@@ -65,7 +65,16 @@ func TestGitOptionInjectionMitigation(t *testing.T) {
 	t.Run("RemoteAdd dashed name", func(t *testing.T) {
 		err := baseGit.RemoteAdd("--upload-pack=exploit", "http://example.com")
 		if err != nil {
-			// This might fail if git rejects the name entirely, but it shouldn't execute anything
+			t.Fatalf("RemoteAdd failed to create remote with dashed name: %v", err)
+		}
+
+		// Verify remote was created with the literal dashed name
+		out, err := baseGit.RemoteList()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "--upload-pack=exploit") {
+			t.Errorf("Expected remote to be created with dashed name, got: %q", out)
 		}
 	})
 }
