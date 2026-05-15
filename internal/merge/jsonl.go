@@ -2,6 +2,7 @@ package merge
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -130,17 +131,17 @@ func hashNormalized(line string) string {
 	if err := json.Unmarshal([]byte(line), &obj); err != nil {
 		// Not valid JSON — hash the raw line
 		h := sha256.Sum256([]byte(line))
-		return fmt.Sprintf("%x", h)
+		return hex.EncodeToString(h[:])
 	}
 
 	normalized, err := json.Marshal(obj)
 	if err != nil {
 		h := sha256.Sum256([]byte(line))
-		return fmt.Sprintf("%x", h)
+		return hex.EncodeToString(h[:])
 	}
 
 	h := sha256.Sum256(normalized)
-	return fmt.Sprintf("%x", h)
+	return hex.EncodeToString(h[:])
 }
 
 // extractTimestamp pulls the "timestamp" field from a JSON line for sorting.
