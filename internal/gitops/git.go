@@ -67,7 +67,7 @@ func (g *Git) Init() error {
 
 // Add stages files.
 func (g *Git) Add(paths ...string) error {
-	_, err := g.run(append([]string{"add"}, paths...)...)
+	_, err := g.run(append([]string{"add", "--"}, paths...)...)
 	return err
 }
 
@@ -126,7 +126,8 @@ func (g *Git) pushWithArgs(remote, branch string, setUpstream bool) (PushStats, 
 	if setUpstream {
 		args = append(args, "-u")
 	}
-	args = append(args, remote, branch)
+	// -- keeps a dash-prefixed remote/branch from being parsed as an option.
+	args = append(args, "--", remote, branch)
 
 	stdout, stderr, err := g.runSeparate(args...)
 	combined := joinStreams(stdout, stderr)
@@ -141,7 +142,7 @@ func (g *Git) pushWithArgs(remote, branch string, setUpstream bool) (PushStats, 
 
 // Fetch fetches from the given remote.
 func (g *Git) Fetch(remote string) (string, error) {
-	return g.run("fetch", remote)
+	return g.run("fetch", "--", remote)
 }
 
 // Pull pulls from the given remote and branch and returns a PullStats
@@ -158,8 +159,9 @@ func (g *Git) Pull(remote, branch string) (PullStats, string, error) {
 	// callers rely on the "CONFLICT" / "Already up to date" substrings in
 	// the human-friendly form, and the merge driver's stderr arrives
 	// interleaved with stdout — both ends up in the same string for the
-	// parser. Color is suppressed via -c flags.
-	cmd := exec.Command("git", append([]string{"-C", g.dir, "-c", "color.ui=never", "pull"}, remote, branch)...)
+	// parser. Color is suppressed via -c flags. The -- separator keeps a
+	// dash-prefixed remote/branch from being parsed as a git option.
+	cmd := exec.Command("git", append([]string{"-C", g.dir, "-c", "color.ui=never", "pull", "--"}, remote, branch)...)
 	rawOut, err := cmd.CombinedOutput()
 	out := strings.TrimSpace(string(rawOut))
 
@@ -185,7 +187,7 @@ func (g *Git) Pull(remote, branch string) (PullStats, string, error) {
 
 // Merge merges the given ref into the current branch.
 func (g *Git) Merge(ref string) (string, error) {
-	return g.run("merge", ref)
+	return g.run("merge", "--", ref)
 }
 
 // MergeAbort aborts a merge in progress.
@@ -194,9 +196,25 @@ func (g *Git) MergeAbort() error {
 	return err
 }
 
+// rejectUnsafeRemoteURL blocks remote URLs whose transport executes an
+// arbitrary command. ext:: runs its argument as a shell command on every
+// fetch/push, so it is a code-execution vector regardless of how safely
+// the URL is passed as a positional — the -- separator cannot neutralize
+// a valid-but-malicious positional. Called from every path that records a
+// remote URL (add and set-url) so the guard can't be bypassed by editing.
+func rejectUnsafeRemoteURL(url string) error {
+	if strings.HasPrefix(url, "ext::") {
+		return fmt.Errorf("refusing remote with ext:: URL (arbitrary command execution transport): %s", url)
+	}
+	return nil
+}
+
 // RemoteAdd adds a git remote.
 func (g *Git) RemoteAdd(name, url string) error {
-	_, err := g.run("remote", "add", name, url)
+	if err := rejectUnsafeRemoteURL(url); err != nil {
+		return err
+	}
+	_, err := g.run("remote", "add", "--", name, url)
 	return err
 }
 
@@ -207,13 +225,16 @@ func (g *Git) RemoteList() (string, error) {
 
 // RemoteRemove removes a git remote.
 func (g *Git) RemoteRemove(name string) error {
-	_, err := g.run("remote", "remove", name)
+	_, err := g.run("remote", "remove", "--", name)
 	return err
 }
 
 // RemoteSetURL updates the URL of an existing git remote.
 func (g *Git) RemoteSetURL(name, url string) error {
-	_, err := g.run("remote", "set-url", name, url)
+	if err := rejectUnsafeRemoteURL(url); err != nil {
+		return err
+	}
+	_, err := g.run("remote", "set-url", "--", name, url)
 	return err
 }
 
