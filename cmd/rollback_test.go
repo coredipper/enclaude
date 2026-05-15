@@ -174,7 +174,9 @@ func TestRollbackAbort(t *testing.T) {
 	cfg.Save(sealDir)
 
 	git := gitops.New(sealDir)
-	git.Init()
+	if err := git.Init(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
 
 	// Initial commit
 	if err := os.MkdirAll(filepath.Join(claudeDir, "commands"), 0700); err != nil {
