@@ -2,6 +2,7 @@ package store
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,7 +22,8 @@ func NewObjectStore(sealDir string) *ObjectStore {
 // ContentHash computes the SHA-256 hash of plaintext content.
 func ContentHash(data []byte) string {
 	h := sha256.Sum256(data)
-	return fmt.Sprintf("%x", h)
+	// Optimize hash encoding: hex.EncodeToString is ~2x faster and allocates less than fmt.Sprintf("%x")
+	return hex.EncodeToString(h[:])
 }
 
 // ObjectPath returns the filesystem path for a given content hash.
