@@ -79,6 +79,31 @@ func TestGitOptionInjectionMitigation(t *testing.T) {
 	})
 }
 
+// TestRemoteAddRejectsExtTransport guards the ext:: git transport, which
+// executes an arbitrary command on fetch/push. The -- option separator
+// cannot neutralize this because the URL is a valid positional, not an
+// option — so RemoteAdd must reject it explicitly.
+func TestRemoteAddRejectsExtTransport(t *testing.T) {
+	g := New(t.TempDir())
+	if err := g.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	err := g.RemoteAdd("evil", "ext::sh -c 'touch pwned'")
+	if err == nil {
+		t.Fatal("RemoteAdd accepted an ext:: URL; expected rejection")
+	}
+	if !strings.Contains(err.Error(), "ext::") {
+		t.Errorf("rejection error should mention ext::, got: %v", err)
+	}
+
+	// A benign URL must still be accepted (remote add records config only,
+	// no network), so the guard doesn't over-reject.
+	if err := g.RemoteAdd("origin", "https://example.invalid/r.git"); err != nil {
+		t.Fatalf("RemoteAdd rejected a benign https URL: %v", err)
+	}
+}
+
 func TestConfigMergeDriverQuoting(t *testing.T) {
 	tmp := t.TempDir()
 	g := New(tmp)

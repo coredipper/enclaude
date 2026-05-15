@@ -87,6 +87,12 @@ func (g *Git) MergeAbort() error {
 
 // RemoteAdd adds a git remote.
 func (g *Git) RemoteAdd(name, url string) error {
+	// The ext:: transport runs an arbitrary command on fetch/push, so a
+	// remote URL using it is a code-execution vector even when passed as a
+	// safe positional — the -- separator above cannot neutralize it.
+	if strings.HasPrefix(url, "ext::") {
+		return fmt.Errorf("refusing remote with ext:: URL (arbitrary command execution transport): %s", url)
+	}
 	_, err := g.run("remote", "add", "--", name, url)
 	return err
 }
