@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"filippo.io/age"
@@ -151,12 +152,12 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		}
 
 		manifest.Files[f.RelPath] = FileEntry{
-			ContentHash:    hash,
-			SizePlaintext:  f.Size,
-			SizeEncrypted:  int64(len(encrypted)),
-			Mtime:          time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
-			MergeStrategy:  ResolveMergeStrategy(f.RelPath, cfg.Merge),
-			JSONLLineCount: lineCount,
+			ContentHash:     hash,
+			SizePlaintext:   f.Size,
+			SizeEncrypted:   int64(len(encrypted)),
+			Mtime:           time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
+			MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
+			JSONLLineCount:  lineCount,
 			SessionComplete: isSessionComplete(f.RelPath),
 		}
 	}
@@ -295,6 +296,45 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 	return stats, nil
 }
 
+type fileHashResult struct {
+	relPath string
+	hash    string
+}
+
+func computeFileHashesConcurrent(files []ScanResult) map[string]string {
+	const maxWorkers = 8
+	jobs := make(chan ScanResult, len(files))
+	results := make(chan fileHashResult, len(files))
+
+	var wg sync.WaitGroup
+	for i := 0; i < maxWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for f := range jobs {
+				if data, err := os.ReadFile(f.AbsPath); err == nil {
+					results <- fileHashResult{relPath: f.RelPath, hash: ContentHash(data)}
+				}
+			}
+		}()
+	}
+
+	for _, f := range files {
+		jobs <- f
+	}
+	close(jobs)
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	m := make(map[string]string, len(files))
+	for r := range results {
+		m[r.relPath] = r.hash
+	}
+	return m
+}
 
 // Status returns the diff between the current claude directory and the seal manifest.
 func Status(cfg *config.Config) (*DiffResult, error) {
@@ -310,13 +350,10 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 
 	// Build a "current" manifest from disk
 	current := NewManifest(cfg.Seal.DeviceID)
-	for _, f := range files {
-		data, err := os.ReadFile(f.AbsPath)
-		if err != nil {
-			continue
-		}
-		current.Files[f.RelPath] = FileEntry{
-			ContentHash: ContentHash(data),
+	m := computeFileHashesConcurrent(files)
+	for relPath, hash := range m {
+		current.Files[relPath] = FileEntry{
+			ContentHash: hash,
 		}
 	}
 
@@ -348,14 +385,7 @@ func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
 	}
 
 	// Build current state from disk
-	onDisk := make(map[string]string) // relPath -> hash
-	for _, f := range files {
-		data, err := os.ReadFile(f.AbsPath)
-		if err != nil {
-			continue
-		}
-		onDisk[f.RelPath] = ContentHash(data)
-	}
+	onDisk := computeFileHashesConcurrent(files) // relPath -> hash
 
 	var result DiffResult
 
