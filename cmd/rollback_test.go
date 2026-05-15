@@ -13,6 +13,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// TestRollbackE2E verifies that a series of commits can be rolled back to a specific ref,
+// that the expected files are restored, left unchanged, or deleted according to the target commit,
+// and that a safety commit and a rollback commit are correctly recorded in the git log.
+//
+// Note: This test relies on runGit() which is defined in readme_regen_test.go.
 func TestRollbackE2E(t *testing.T) {
 	// Setup test environment
 	claudeDir := t.TempDir()
@@ -157,6 +162,8 @@ func TestRollbackE2E(t *testing.T) {
 	}
 }
 
+// TestRollbackAbort verifies that a rollback without the --force flag is correctly
+// aborted and returns a nil error when the user does not provide affirmative confirmation (e.g. 'n').
 func TestRollbackAbort(t *testing.T) {
 	claudeDir := t.TempDir()
 	sealDir := t.TempDir()
