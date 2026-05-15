@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -31,7 +32,7 @@ func (g *Git) Init() error {
 
 // Add stages files.
 func (g *Git) Add(paths ...string) error {
-	_, err := g.run(append([]string{"add"}, paths...)...)
+	_, err := g.run(append([]string{"add", "--"}, paths...)...)
 	return err
 }
 
@@ -55,27 +56,27 @@ func (g *Git) HasChanges() bool {
 
 // Push pushes to the given remote and branch.
 func (g *Git) Push(remote, branch string) (string, error) {
-	return g.run("push", remote, branch)
+	return g.run("push", "--", remote, branch)
 }
 
 // PushWithUpstream pushes and sets upstream tracking.
 func (g *Git) PushWithUpstream(remote, branch string) (string, error) {
-	return g.run("push", "-u", remote, branch)
+	return g.run("push", "-u", "--", remote, branch)
 }
 
 // Fetch fetches from the given remote.
 func (g *Git) Fetch(remote string) (string, error) {
-	return g.run("fetch", remote)
+	return g.run("fetch", "--", remote)
 }
 
 // Pull pulls from the given remote and branch.
 func (g *Git) Pull(remote, branch string) (string, error) {
-	return g.run("pull", remote, branch)
+	return g.run("pull", "--", remote, branch)
 }
 
 // Merge merges the given ref into the current branch.
 func (g *Git) Merge(ref string) (string, error) {
-	return g.run("merge", ref)
+	return g.run("merge", "--", ref)
 }
 
 // MergeAbort aborts a merge in progress.
@@ -86,7 +87,13 @@ func (g *Git) MergeAbort() error {
 
 // RemoteAdd adds a git remote.
 func (g *Git) RemoteAdd(name, url string) error {
-	_, err := g.run("remote", "add", name, url)
+	// The ext:: transport runs an arbitrary command on fetch/push, so a
+	// remote URL using it is a code-execution vector even when passed as a
+	// safe positional — the -- separator above cannot neutralize it.
+	if strings.HasPrefix(url, "ext::") {
+		return fmt.Errorf("refusing remote with ext:: URL (arbitrary command execution transport): %s", url)
+	}
+	_, err := g.run("remote", "add", "--", name, url)
 	return err
 }
 
@@ -97,13 +104,13 @@ func (g *Git) RemoteList() (string, error) {
 
 // RemoteRemove removes a git remote.
 func (g *Git) RemoteRemove(name string) error {
-	_, err := g.run("remote", "remove", name)
+	_, err := g.run("remote", "remove", "--", name)
 	return err
 }
 
 // RemoteSetURL updates the URL of an existing git remote.
 func (g *Git) RemoteSetURL(name, url string) error {
-	_, err := g.run("remote", "set-url", name, url)
+	_, err := g.run("remote", "set-url", "--", name, url)
 	return err
 }
 
@@ -123,11 +130,31 @@ func (g *Git) LogFull(n int) (string, error) {
 }
 
 // ConfigMergeDriver registers a custom merge driver.
-func (g *Git) ConfigMergeDriver(name, driverCmd string) error {
+func (g *Git) ConfigMergeDriver(name string, driverArgs []string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("getting executable path: %w", err)
+	}
+
+	// Note: os.Executable() on Linux can return a path under /proc/self/exe if unlinked
+	// Note: POSIX single-quote escape won't work natively on Windows cmd.exe without bash
+	var sb strings.Builder
+	sb.WriteString("'" + strings.ReplaceAll(exe, "'", "'\\''") + "'")
+	for _, arg := range driverArgs {
+		sb.WriteString(" ")
+		// Git special tokens should not be quoted so they are expanded by git
+		if arg == "%O" || arg == "%A" || arg == "%B" || arg == "%L" || arg == "%P" {
+			sb.WriteString(arg)
+		} else {
+			sb.WriteString("'" + strings.ReplaceAll(arg, "'", "'\\''") + "'")
+		}
+	}
+	driverCmd := sb.String()
+
 	if _, err := g.run("config", fmt.Sprintf("merge.%s.name", name), "Claude Seal "+name+" merge"); err != nil {
 		return err
 	}
-	_, err := g.run("config", fmt.Sprintf("merge.%s.driver", name), driverCmd)
+	_, err = g.run("config", fmt.Sprintf("merge.%s.driver", name), driverCmd)
 	return err
 }
 
