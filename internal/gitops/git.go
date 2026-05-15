@@ -86,6 +86,16 @@ func (g *Git) MergeAbort() error {
 
 // RemoteAdd adds a git remote.
 func (g *Git) RemoteAdd(name, url string) error {
+	if strings.HasPrefix(name, "-") {
+		return fmt.Errorf("invalid remote name: cannot start with a dash")
+	}
+	if strings.HasPrefix(url, "-") {
+		return fmt.Errorf("invalid remote url: cannot start with a dash")
+	}
+	if strings.HasPrefix(url, "ext::") {
+		return fmt.Errorf("invalid remote url: ext:: protocol is not allowed")
+	}
+
 	_, err := g.run("remote", "add", name, url)
 	return err
 }
