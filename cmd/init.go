@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/store"
@@ -72,7 +71,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Create passphrase-encrypted backup
-	if err := createKeyBackup(sealDir, identity); err != nil {
+	if err := createKeyBackup(sealDir, identity.String()); err != nil {
 		return err
 	}
 
@@ -194,7 +193,7 @@ enclaude status        # show unsealed changes not yet sealed
 {FENCE}
 `
 
-func createKeyBackup(sealDir string, identity *age.X25519Identity) error {
+func createKeyBackup(sealDir, secretKey string) error {
 	fmt.Println()
 	passphrase, err := ui.ReadPassphraseOptional("Enter backup passphrase (for key recovery, blank to skip): ")
 	if err != nil {
@@ -202,7 +201,7 @@ func createKeyBackup(sealDir string, identity *age.X25519Identity) error {
 	}
 
 	if passphrase != "" {
-		backup, err := crypto.EncryptWithPassphrase([]byte(identity.String()), passphrase)
+		backup, err := crypto.EncryptWithPassphrase([]byte(secretKey), passphrase)
 		if err != nil {
 			return fmt.Errorf("creating key backup: %w", err)
 		}
