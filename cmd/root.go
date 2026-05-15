@@ -12,10 +12,10 @@ import (
 var Version = "0.2.0"
 
 var (
-	flagVerbose   bool
-	flagDryRun    bool
+	flagVerbose  bool
+	flagDryRun   bool
 	flagClaudeDir string
-	flagSealDir   string
+	flagSealDir  string
 )
 
 var rootCmd = &cobra.Command{

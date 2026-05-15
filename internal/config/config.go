@@ -14,25 +14,25 @@ import (
 const ConfigVersion = 2
 
 type Config struct {
-	Version int               `toml:"config_version"`
-	Seal    SealSection       `toml:"seal"`
-	Sync    SyncSection       `toml:"sync"`
-	Include PatternSection    `toml:"include"`
-	Exclude PatternSection    `toml:"exclude"`
-	Merge   map[string]string `toml:"merge_strategies"`
+	Version  int            `toml:"config_version"`
+	Seal    SealSection    `toml:"seal"`
+	Sync     SyncSection     `toml:"sync"`
+	Include  PatternSection  `toml:"include"`
+	Exclude  PatternSection  `toml:"exclude"`
+	Merge    map[string]string `toml:"merge_strategies"`
 }
 
 type SealSection struct {
 	ClaudeDir string `toml:"claude_dir"`
-	SealDir   string `toml:"seal_dir"`
+	SealDir  string `toml:"seal_dir"`
 	DeviceID  string `toml:"device_id"`
 }
 
 type SyncSection struct {
-	AutoSealOnSessionEnd     bool `toml:"auto_seal_on_session_end"`
+	AutoSealOnSessionEnd   bool `toml:"auto_seal_on_session_end"`
 	AutoUnsealOnSessionStart bool `toml:"auto_unseal_on_session_start"`
-	AutoPush                 bool `toml:"auto_push"`
-	AutoPull                 bool `toml:"auto_pull"`
+	AutoPush               bool `toml:"auto_push"`
+	AutoPull               bool `toml:"auto_pull"`
 }
 
 type PatternSection struct {
@@ -44,7 +44,7 @@ func DefaultConfig(claudeDir, sealDir string) *Config {
 		Version: ConfigVersion,
 		Seal: SealSection{
 			ClaudeDir: claudeDir,
-			SealDir:   sealDir,
+			SealDir:  sealDir,
 			DeviceID:  generateDeviceID(),
 		},
 		Sync: SyncSection{
@@ -91,15 +91,15 @@ func DefaultConfig(claudeDir, sealDir string) *Config {
 			},
 		},
 		Merge: map[string]string{
-			"history.jsonl":                   "jsonl_dedup",
-			"projects/*/sessions-index.json":  "sessions_index",
-			"stats-cache.json":                "last_write_wins",
-			"settings.json":                   "last_write_wins",
-			"projects/*/*.jsonl":              "immutable",
-			"projects/*/subagents/**/*.jsonl": "immutable",
-			"projects/*/subagents/**/*.json":  "immutable",
-			"projects/*/memory/**":            "text_merge",
-			"**/*.md":                         "text_merge",
+			"history.jsonl":                    "jsonl_dedup",
+			"projects/*/sessions-index.json":   "sessions_index",
+			"stats-cache.json":                 "last_write_wins",
+			"settings.json":                    "last_write_wins",
+			"projects/*/*.jsonl":               "immutable",
+			"projects/*/subagents/**/*.jsonl":  "immutable",
+			"projects/*/subagents/**/*.json":   "immutable",
+			"projects/*/memory/**":             "text_merge",
+			"**/*.md":                          "text_merge",
 		},
 	}
 }

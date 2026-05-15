@@ -6,8 +6,8 @@ import (
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/gitops"
-	"github.com/coredipper/enclaude/internal/store"
 	"github.com/coredipper/enclaude/internal/ui"
+	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
 

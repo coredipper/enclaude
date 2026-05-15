@@ -8,8 +8,8 @@ import (
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/gitops"
-	sealstore "github.com/coredipper/enclaude/internal/store"
 	"github.com/coredipper/enclaude/internal/ui"
+	sealstore "github.com/coredipper/enclaude/internal/store"
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"github.com/spf13/cobra"
 )
