@@ -111,6 +111,8 @@ func TestScanFilesDefaultConfig(t *testing.T) {
 	}
 }
 
+// TestScanFilesErrors verifies that ScanFiles handles inaccessible directories appropriately,
+// correctly distinguishing between permission errors in included vs. excluded paths.
 func TestScanFilesErrors(t *testing.T) {
 	t.Run("PermissionDeniedIncluded", func(t *testing.T) {
 		dir := t.TempDir()
