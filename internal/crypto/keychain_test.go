@@ -323,3 +323,47 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// TestDeleteKey_CombinedError_BothFailures explicitly tests the scenario
+// where both Keyring Delete and File Delete fail simultaneously.
+func TestDeleteKey_CombinedError_BothFailures(t *testing.T) {
+	withTestEnv(t)
+
+	// Seed keyring so DeleteKey actually attempts keyringDelete.
+	id, _ := GenerateKey()
+	if err := keyring.Set(keychainService, keychainAccount, id.String()); err != nil {
+		t.Fatalf("seed keyring: %v", err)
+	}
+
+	// 1. Force keyringDelete to fail
+	delErr := errors.New("keyring locked completely")
+	keyringDelete = func(service, user string) error { return delErr }
+
+	// 2. Force file-fallback delete to fail by pointing the path at a
+	// non-empty directory; os.Remove returns ENOTEMPTY (an *fs.PathError).
+	keyDir := t.TempDir()
+	badPath := filepath.Join(keyDir, "key.age.enc")
+	if err := os.Mkdir(badPath, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(badPath, "child"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write child: %v", err)
+	}
+	t.Setenv("ENCLAUDE_KEY_FILE", badPath)
+
+	err := DeleteKey()
+	if err == nil {
+		t.Fatal("expected combined error from DeleteKey")
+	}
+
+	errMsg := err.Error()
+	if !contains(errMsg, delErr.Error()) {
+		t.Fatalf("error message missing keyring delErr: %v", err)
+	}
+	// The exact string for a non-empty directory error is platform-dependent
+	// (e.g., "directory not empty" vs "The directory is not empty.").
+	// Instead, verify that the file path appears in the error message.
+	if !contains(errMsg, "key.age.enc") {
+		t.Fatalf("error message missing file delete error context (expected file path to be present): %v", err)
+	}
+}
