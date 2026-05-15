@@ -10,10 +10,10 @@ import (
 
 // Manifest tracks all files in the seal store with their content hashes and metadata.
 type Manifest struct {
-	Version  int                    `json:"version"`
-	DeviceID string                 `json:"device_id"`
-	SealedAt string                 `json:"sealed_at"`
-	Files    map[string]FileEntry   `json:"files"`
+	Version  int                  `json:"version"`
+	DeviceID string               `json:"device_id"`
+	SealedAt string               `json:"sealed_at"`
+	Files    map[string]FileEntry `json:"files"`
 }
 
 // FileEntry describes a single file in the seal store.

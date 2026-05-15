@@ -16,9 +16,9 @@ import (
 func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 	seen := make(map[string]string) // hash -> original line
 	var entries []jsonlEntry
-	var cachedLayout string
 
 	for _, data := range [][]byte{ours, theirs} {
+		var cachedLayout string
 		lines := splitLines(string(data))
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
@@ -146,39 +146,10 @@ func hashNormalized(line string) string {
 }
 
 // extractTimestamp pulls the "timestamp" field from a JSON line for sorting.
+// It parses the line as JSON to ensure it extracts the top-level timestamp.
 func extractTimestamp(line string, cachedLayout *string) float64 {
-	// Fast path: try to extract timestamp using string search to avoid full JSON parsing
-	idx := strings.Index(line, `"timestamp":`)
-	if idx != -1 {
-		valStart := idx + 12 // len(`"timestamp":`)
-		for valStart < len(line) && (line[valStart] == ' ' || line[valStart] == '\t') {
-			valStart++
-		}
-		if valStart < len(line) && line[valStart] == '"' {
-			valEnd := strings.IndexByte(line[valStart+1:], '"')
-			if valEnd != -1 {
-				ts := line[valStart+1 : valStart+1+valEnd]
-				if cachedLayout != nil && *cachedLayout != "" {
-					if t, err := time.Parse(*cachedLayout, ts); err == nil {
-						return float64(t.UnixNano())
-					}
-				}
-				for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-					if cachedLayout != nil && *cachedLayout == layout {
-						continue
-					}
-					if t, err := time.Parse(layout, ts); err == nil {
-						if cachedLayout != nil {
-							*cachedLayout = layout
-						}
-						return float64(t.UnixNano())
-					}
-				}
-			}
-		}
-	}
-
-	// Slow path: full JSON parse
+	// We parse the JSON line fully to ensure we only get the top-level "timestamp"
+	// key and avoid returning nested timestamps.
 	var obj map[string]interface{}
 	if err := json.Unmarshal([]byte(line), &obj); err != nil {
 		return 0
@@ -186,7 +157,8 @@ func extractTimestamp(line string, cachedLayout *string) float64 {
 
 	// Try "timestamp" (history.jsonl uses Unix millis as number)
 	if ts, ok := obj["timestamp"].(float64); ok {
-		return ts
+		// return as UnixNano to be comparable to the string layout parser
+		return ts * float64(time.Millisecond)
 	}
 
 	// Try "timestamp" as string (session JSONL uses ISO 8601 / RFC 3339 format)
@@ -197,9 +169,6 @@ func extractTimestamp(line string, cachedLayout *string) float64 {
 			}
 		}
 		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-			if cachedLayout != nil && *cachedLayout == layout {
-				continue
-			}
 			if t, err := time.Parse(layout, ts); err == nil {
 				if cachedLayout != nil {
 					*cachedLayout = layout

@@ -283,6 +283,55 @@ func TestMergeJSONLISOTimestampsInterleavedChronologicalOrder(t *testing.T) {
 	}
 }
 
+func TestMergeJSONLNestedTimestamp(t *testing.T) {
+	ours := []byte(`{"meta":{"timestamp":"1999-01-01T00:00:00Z"},"timestamp":"2024-06-01T00:00:00Z","display":"ours"}
+`)
+	theirs := []byte(`{"meta":{"timestamp":"1999-01-01T00:00:00Z"},"timestamp":"2024-05-01T00:00:00Z","display":"theirs"}
+`)
+
+	merged, err := MergeJSONL(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeJSONL() error: %v", err)
+	}
+
+	lines := nonEmptyLines(string(merged))
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d: %s", len(lines), string(merged))
+	}
+
+	// May should come before June.
+	var first map[string]interface{}
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("line 0 is not valid JSON: %v", err)
+	}
+	if first["display"] != "theirs" {
+		t.Errorf("expected 'theirs' first (May < June), got: %v", first["display"])
+	}
+}
+
+func TestMergeJSONLMixedLayouts(t *testing.T) {
+	ours := []byte(`{"timestamp":"2024-01-02T00:00:00.123Z","display":"ours_nano"}
+{"timestamp":1704240000001,"display":"ours_num"}
+`)
+	theirs := []byte(`{"timestamp":"2024-01-01T00:00:00Z","display":"theirs_rfc"}
+`)
+
+	merged, err := MergeJSONL(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeJSONL() error: %v", err)
+	}
+
+	lines := nonEmptyLines(string(merged))
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d: %s", len(lines), string(merged))
+	}
+
+	// Sequence should be: Jan 1 (theirs_rfc), Jan 2 (ours_nano), Jan 3 (ours_num = Jan 3 2024)
+	if !strings.Contains(lines[0], `"theirs_rfc"`) {
+		t.Errorf("expected line 0 to be theirs_rfc: %s", lines[0])
+	}
+}
+
 func TestMergeSessionsIndexMissingEntriesKey(t *testing.T) {
 	ours := []byte(`{"version": 2}`)
 	theirs := []byte(`{"version": 1, "entries": [{"sessionId": "s1"}]}`)
