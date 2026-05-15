@@ -57,6 +57,8 @@ func TestRollbackE2E(t *testing.T) {
 	if err := git.Init(); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
+	runGit(t, sealDir, "config", "user.name", "Test User")
+	runGit(t, sealDir, "config", "user.email", "test@example.com")
 
 	// Commit A (Initial)
 	// Create required directories first
@@ -177,6 +179,8 @@ func TestRollbackAbort(t *testing.T) {
 	if err := git.Init(); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
+	runGit(t, sealDir, "config", "user.name", "Test User")
+	runGit(t, sealDir, "config", "user.email", "test@example.com")
 
 	// Initial commit
 	if err := os.MkdirAll(filepath.Join(claudeDir, "commands"), 0700); err != nil {
