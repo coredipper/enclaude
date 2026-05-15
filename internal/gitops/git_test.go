@@ -18,6 +18,13 @@ func TestGitOptionInjectionMitigation(t *testing.T) {
 	if err := baseGit.Init(); err != nil {
 		t.Fatal(err)
 	}
+	// Configure git for CI environments where user is not set
+	if _, err := baseGit.run("config", "user.name", "Test User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := baseGit.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
 
 	f := filepath.Join(baseDir, "file.txt")
 	if err := os.WriteFile(f, []byte("data"), 0644); err != nil {
