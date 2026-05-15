@@ -147,3 +147,53 @@ func TestMatchGlob(t *testing.T) {
 		})
 	}
 }
+
+// mkUnreadableDir creates dir/noperms with mode 0000, registers cleanup that
+// restores permissions so t.TempDir() can be removed, and skips the test if
+// the directory is still readable after chmod — which happens when tests run
+// as root or on filesystems that don't enforce mode bits, where the
+// permission-denied assertion would be a false failure.
+func mkUnreadableDir(t *testing.T, dir string) string {
+	t.Helper()
+	noPermsDir := filepath.Join(dir, "noperms")
+	if err := os.Mkdir(noPermsDir, 0000); err != nil {
+		t.Fatalf("failed to create directory: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(noPermsDir, 0755) })
+	if _, err := os.ReadDir(noPermsDir); err == nil {
+		t.Skip("directory readable despite mode 0000 (running as root or permissive filesystem); permission test not meaningful here")
+	}
+	return noPermsDir
+}
+
+// TestScanFilesErrors verifies that ScanFiles handles inaccessible directories appropriately,
+// correctly distinguishing between permission errors in included vs. excluded paths.
+func TestScanFilesErrors(t *testing.T) {
+	t.Run("PermissionDeniedIncluded", func(t *testing.T) {
+		dir := t.TempDir()
+		mkUnreadableDir(t, dir)
+
+		_, err := ScanFiles(dir, []string{"**"}, nil)
+		if err == nil {
+			t.Fatal("expected error for inaccessible directory")
+		}
+		if err.Error() != "scan incomplete: 1 inaccessible file(s)" {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("PermissionDeniedExcluded", func(t *testing.T) {
+		dir := t.TempDir()
+		mkUnreadableDir(t, dir)
+
+		// Exclude the inaccessible directory
+		excludes := []string{"noperms/**"}
+		results, err := ScanFiles(dir, []string{"**"}, excludes)
+		if err != nil {
+			t.Fatalf("expected no error when inaccessible directory is excluded, got: %v", err)
+		}
+		if len(results) != 0 {
+			t.Errorf("expected no results, got %d", len(results))
+		}
+	})
+}
