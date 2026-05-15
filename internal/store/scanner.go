@@ -86,6 +86,8 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 	return results, nil
 }
 
+// compiledPattern holds a pre-processed glob pattern to avoid repeatedly
+// checking for double-stars and splitting the pattern string.
 type compiledPattern struct {
 	raw           string
 	hasDoubleStar bool
