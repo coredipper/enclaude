@@ -69,7 +69,7 @@ func runSeal(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("seal: %w", err)
 	}
-	fmt.Printf("  %s\n", stats)
+	fmt.Println(stats.Multiline("  "))
 
 	if stats.Errors > 0 {
 		fmt.Printf("  Warning: %d errors encountered. Skipping commit.\n", stats.Errors)

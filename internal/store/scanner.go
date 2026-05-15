@@ -25,13 +25,16 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 	var results []ScanResult
 	var walkErrors int
 
+	compiledIncludes := compilePatterns(includes)
+	compiledExcludes := compilePatterns(excludes)
+
 	err := filepath.Walk(claudeDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			// Count errors for paths that could contain managed files.
 			// For directories: any non-excluded dir could have included
 			// descendants. For files: check include/exclude directly.
 			if rel, relErr := filepath.Rel(claudeDir, path); relErr == nil && rel != "." {
-				excluded := matchesAny(rel, excludes) || matchesAny(rel+"/", excludes)
+				excluded := matchesAnyCompiled(rel, compiledExcludes) || matchesAnyCompiled(rel+"/", compiledExcludes)
 				if !excluded {
 					walkErrors++
 				}
@@ -44,7 +47,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 				return nil
 			}
 			// Skip entire excluded directories for performance
-			if matchesAny(rel+"/", excludes) {
+			if matchesAnyCompiled(rel+"/", compiledExcludes) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -56,12 +59,12 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 		}
 
 		// Check exclude first (takes priority)
-		if matchesAny(rel, excludes) {
+		if matchesAnyCompiled(rel, compiledExcludes) {
 			return nil
 		}
 
 		// Check include
-		if !matchesAny(rel, includes) {
+		if !matchesAnyCompiled(rel, compiledIncludes) {
 			return nil
 		}
 
@@ -83,12 +86,47 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 	return results, nil
 }
 
-// matchesAny checks if a relative path matches any of the glob patterns.
-// Supports ** for recursive directory matching.
-func matchesAny(relPath string, patterns []string) bool {
-	for _, pattern := range patterns {
-		if MatchGlob(relPath, pattern) {
-			return true
+// compiledPattern holds a pre-processed glob pattern to avoid repeatedly
+// checking for double-stars and splitting the pattern string.
+type compiledPattern struct {
+	raw           string
+	hasDoubleStar bool
+	segs          []string
+}
+
+func compilePatterns(patterns []string) []compiledPattern {
+	res := make([]compiledPattern, len(patterns))
+	for i, p := range patterns {
+		res[i] = compiledPattern{
+			raw:           p,
+			hasDoubleStar: strings.Contains(p, "**"),
+		}
+		if res[i].hasDoubleStar {
+			res[i].segs = strings.Split(p, "/")
+		}
+	}
+	return res
+}
+
+// matchesAnyCompiled checks if a relative path matches any of the compiled glob patterns.
+func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
+	var pathSegs []string
+	var segsComputed bool
+
+	for _, p := range patterns {
+		if !p.hasDoubleStar {
+			matched, _ := filepath.Match(p.raw, relPath)
+			if matched {
+				return true
+			}
+		} else {
+			if !segsComputed {
+				pathSegs = strings.Split(relPath, "/")
+				segsComputed = true
+			}
+			if matchSegments(pathSegs, p.segs) {
+				return true
+			}
 		}
 	}
 	return false

@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,16 +12,30 @@ import (
 	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/merge"
+	"github.com/coredipper/enclaude/internal/session"
 )
+
+// SessionStats counts session JSONL files under projects/ and how they
+// changed relative to the previous manifest.
+type SessionStats struct {
+	Tracked int // session JSONLs in the new manifest
+	New     int // session JSONLs not present in the prior manifest
+	Updated int // session JSONLs whose JSONLLineCount grew since prior manifest
+}
 
 // SealStats tracks what happened during a seal operation.
 type SealStats struct {
-	Scanned   int
-	Added     int
-	Modified  int
-	Deleted   int
-	Unchanged int
-	Errors    int
+	Scanned         int
+	Added           int
+	Modified        int
+	Deleted         int
+	Unchanged       int
+	Errors          int
+	BytesPlaintext  int64
+	BytesEncrypted  int64
+	Sessions        SessionStats
+	Elapsed         time.Duration
 }
 
 // HasChanges returns true if the seal produced any modifications worth committing.
@@ -28,6 +43,8 @@ func (s SealStats) HasChanges() bool {
 	return s.Added > 0 || s.Modified > 0 || s.Deleted > 0
 }
 
+// String returns a compact single-line summary suitable for commit messages.
+// Multiline() is the right choice for terminal display.
 func (s SealStats) String() string {
 	if s.Deleted > 0 {
 		return fmt.Sprintf("scanned %d files: %d new, %d modified, %d deleted, %d unchanged",
@@ -37,15 +54,41 @@ func (s SealStats) String() string {
 		s.Scanned, s.Added, s.Modified, s.Unchanged)
 }
 
-// UnsealStats tracks what happened during an unseal operation.
-type UnsealStats struct {
-	Total     int
-	Restored  int
-	Unchanged int
-	Deleted   int
-	Errors    int
+// Multiline returns a 2–3 line summary for sync display: scan counters,
+// data volume + elapsed, and session activity (when any sessions tracked).
+// Each line is prefixed with the given indent.
+func (s SealStats) Multiline(indent string) string {
+	var b strings.Builder
+	b.WriteString(indent)
+	b.WriteString(s.String())
+	if s.BytesPlaintext > 0 || s.BytesEncrypted > 0 {
+		b.WriteByte('\n')
+		b.WriteString(indent)
+		fmt.Fprintf(&b, "%s plaintext → %s encrypted (%s)",
+			FormatSize(s.BytesPlaintext), FormatSize(s.BytesEncrypted), formatElapsed(s.Elapsed))
+	}
+	if s.Sessions.Tracked > 0 {
+		b.WriteByte('\n')
+		b.WriteString(indent)
+		fmt.Fprintf(&b, "%d sessions tracked, %d new, %d updated since last sync",
+			s.Sessions.Tracked, s.Sessions.New, s.Sessions.Updated)
+	}
+	return b.String()
 }
 
+// UnsealStats tracks what happened during an unseal operation.
+type UnsealStats struct {
+	Total           int
+	Restored        int
+	Unchanged       int
+	Deleted         int
+	Errors          int
+	BytesDecrypted  int64
+	Merges          merge.Aggregate
+	Elapsed         time.Duration
+}
+
+// String returns a compact single-line summary.
 func (s UnsealStats) String() string {
 	if s.Deleted > 0 {
 		return fmt.Sprintf("%d files: %d restored, %d unchanged, %d deleted",
@@ -55,11 +98,45 @@ func (s UnsealStats) String() string {
 		s.Total, s.Restored, s.Unchanged)
 }
 
+// Multiline returns the single-line summary plus an optional merge-activity
+// line when the preceding pull invoked the merge driver.
+func (s UnsealStats) Multiline(indent string) string {
+	var b strings.Builder
+	b.WriteString(indent)
+	b.WriteString(s.String())
+	if s.BytesDecrypted > 0 {
+		fmt.Fprintf(&b, " (%s plaintext, %s)", FormatSize(s.BytesDecrypted), formatElapsed(s.Elapsed))
+	}
+	if s.Merges.FilesMerged > 0 {
+		b.WriteByte('\n')
+		b.WriteString(indent)
+		fmt.Fprintf(&b, "merged %d files (%d dup lines removed, %d sessions deduped)",
+			s.Merges.FilesMerged, s.Merges.LinesDeduped, s.Merges.SessionsDeduped)
+	}
+	return b.String()
+}
+
+// formatElapsed prints a duration with one significant fractional digit for
+// sub-minute durations ("1.4s"), and a coarser format above that.
+func formatElapsed(d time.Duration) string {
+	if d <= 0 {
+		return "0s"
+	}
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return d.Round(time.Second).String()
+}
+
 // ProgressFunc is called during long operations to report progress.
 type ProgressFunc func(current, total int, path string)
 
 // Seal encrypts changed files from claudeDir into the seal store.
 func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress ProgressFunc) (SealStats, error) {
+	start := time.Now()
 	var stats SealStats
 	sealDir := cfg.Seal.SealDir
 
@@ -68,15 +145,24 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		return stats, fmt.Errorf("initializing object store: %w", err)
 	}
 
-	// Load existing manifest (may be nil on first seal)
+	// Load existing manifest (may be nil on first seal). Snapshot the prior
+	// file entries so we can compute session deltas without paying for a
+	// second pass after the seal mutates the manifest in place.
 	manifest, err := LoadManifest(sealDir)
 	if err != nil {
 		return stats, fmt.Errorf("loading manifest: %w", err)
 	}
+	prior := map[string]FileEntry{}
 	if manifest == nil {
 		manifest = NewManifest(cfg.Seal.DeviceID)
+	} else {
+		maps.Copy(prior, manifest.Files)
 	}
 	manifest.DeviceID = cfg.Seal.DeviceID
+
+	// Active session IDs (PID-alive). Empty when the sessions dir is absent
+	// (e.g. tests) — falls back to path-based completion semantics.
+	activeSessions := activeSessionIDs(cfg.Seal.ClaudeDir)
 
 	// Scan files
 	files, err := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
@@ -132,6 +218,8 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		} else {
 			stats.Added++
 		}
+		stats.BytesPlaintext += f.Size
+		stats.BytesEncrypted += int64(len(encrypted))
 
 		if verbose {
 			action := "new"
@@ -151,13 +239,13 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		}
 
 		manifest.Files[f.RelPath] = FileEntry{
-			ContentHash:    hash,
-			SizePlaintext:  f.Size,
-			SizeEncrypted:  int64(len(encrypted)),
-			Mtime:          time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
-			MergeStrategy:  ResolveMergeStrategy(f.RelPath, cfg.Merge),
-			JSONLLineCount: lineCount,
-			SessionComplete: isSessionComplete(f.RelPath),
+			ContentHash:     hash,
+			SizePlaintext:   f.Size,
+			SizeEncrypted:   int64(len(encrypted)),
+			Mtime:           time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
+			MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
+			JSONLLineCount:  lineCount,
+			SessionComplete: isSessionCompleteFor(f.RelPath, activeSessions),
 		}
 	}
 
@@ -172,18 +260,60 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		}
 	}
 
+	// Tally session activity against the prior manifest. "Updated" counts
+	// session JSONLs whose JSONLLineCount grew since the previous seal —
+	// the most reliable signal short of consulting live process state.
+	for path, entry := range manifest.Files {
+		if !isSessionPath(path) {
+			continue
+		}
+		stats.Sessions.Tracked++
+		priorEntry, ok := prior[path]
+		if !ok {
+			stats.Sessions.New++
+			continue
+		}
+		if entry.JSONLLineCount > priorEntry.JSONLLineCount {
+			stats.Sessions.Updated++
+		}
+	}
+
 	// Save manifest
 	if err := manifest.Save(sealDir); err != nil {
 		return stats, fmt.Errorf("saving manifest: %w", err)
 	}
 
+	stats.Elapsed = time.Since(start)
 	return stats, nil
+}
+
+// activeSessionIDs returns the set of session UUIDs currently associated
+// with live processes. Failure to enumerate returns an empty set so seal
+// falls back to path-based completion (the historical behavior).
+func activeSessionIDs(claudeDir string) map[string]bool {
+	active := map[string]bool{}
+	sessions, err := session.DetectActive(claudeDir)
+	if err != nil {
+		return active
+	}
+	for _, s := range sessions {
+		if s.SessionID != "" {
+			active[s.SessionID] = true
+		}
+	}
+	return active
+}
+
+// isSessionPath matches the on-disk shape of a Claude session transcript.
+func isSessionPath(relPath string) bool {
+	return strings.HasPrefix(relPath, "projects/") && strings.HasSuffix(relPath, ".jsonl")
 }
 
 // Unseal decrypts seal contents back to claudeDir and removes managed
 // files not in the manifest. The manifest is the source of truth.
-func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress ProgressFunc) (UnsealStats, error) {
-	var stats UnsealStats
+func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress ProgressFunc) (stats UnsealStats, err error) {
+	start := time.Now()
+	defer func() { stats.Elapsed = time.Since(start) }()
 	sealDir := cfg.Seal.SealDir
 
 	store := NewObjectStore(sealDir)
@@ -249,6 +379,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 			fmt.Printf("  [restore] %s (%s)\n", relPath, FormatSize(entry.SizePlaintext))
 		}
 		stats.Restored++
+		stats.BytesDecrypted += int64(len(plaintext))
 	}
 
 	// Delete managed files not in the manifest. The manifest is the source
@@ -452,11 +583,21 @@ func patternSpecificity(pattern string) string {
 	return fmt.Sprintf("%02d:%02d:%s", total, len(segs), pattern)
 }
 
-// isSessionComplete determines if a session JSONL file is likely complete.
-// Session files under projects/ with UUID-like names are complete if they exist
-// (active sessions are still being written to, but we check PIDs elsewhere).
-func isSessionComplete(relPath string) bool {
-	return strings.HasPrefix(relPath, "projects/") && strings.HasSuffix(relPath, ".jsonl")
+// isSessionCompleteFor determines whether a session JSONL file looks
+// complete. A session is "complete" iff it lives under projects/, ends in
+// .jsonl, and its UUID is not in the active set. An empty active set means
+// caller couldn't enumerate live sessions, in which case we fall back to
+// the historical path-based heuristic ("any matching path is complete").
+func isSessionCompleteFor(relPath string, active map[string]bool) bool {
+	if !isSessionPath(relPath) {
+		return false
+	}
+	if len(active) == 0 {
+		return true
+	}
+	base := filepath.Base(relPath)
+	uuid := strings.TrimSuffix(base, ".jsonl")
+	return !active[uuid]
 }
 
 // RepairResult describes the outcome of a seal store integrity check.
@@ -554,6 +695,11 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 
 	store := NewObjectStore(cfg.Seal.SealDir)
 
+	// Mirror Seal's PID-aware completion check so a Repair doesn't
+	// silently flip SessionComplete=true on currently-active session
+	// transcripts.
+	activeSessions := activeSessionIDs(cfg.Seal.ClaudeDir)
+
 	// Track old hashes that get superseded during repair so we can
 	// include them in orphan deletion (they become orphaned only after
 	// the manifest is updated with new hashes).
@@ -599,7 +745,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 				entry.JSONLLineCount++
 			}
 		}
-		entry.SessionComplete = isSessionComplete(path)
+		entry.SessionComplete = isSessionCompleteFor(path, activeSessions)
 		manifest.Files[path] = entry
 
 		result.Fixed++
