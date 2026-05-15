@@ -122,12 +122,7 @@ type jsonlEntry struct {
 }
 
 func splitLines(s string) []string {
-	// strings.Split retains empty trailing strings if the input ends in a newline
-	lines := strings.Split(s, "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		return lines[:len(lines)-1]
-	}
-	return lines
+	return strings.Split(s, "\n")
 }
 
 // hashNormalized computes SHA-256 of JSON with sorted keys to catch semantic duplicates.

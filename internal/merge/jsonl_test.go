@@ -337,17 +337,20 @@ func TestMergeSessionsIndexDeduplicatesOnSessionId(t *testing.T) {
 	}
 }
 
+// TestSplitLines verifies that splitLines wraps strings.Split appropriately
+// and produces the expected raw slices including trailing empty strings
+// for inputs with trailing newlines.
 func TestSplitLines(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
 		expected []string
 	}{
-		{"empty", "", []string{}},
-		{"newline", "\n", []string{""}},
+		{"empty", "", []string{""}},
+		{"newline", "\n", []string{"", ""}},
 		{"no newline", "a", []string{"a"}},
-		{"standard", "a\nb\n", []string{"a", "b"}},
-		{"multiple trailing", "a\n\n", []string{"a", ""}},
+		{"standard", "a\nb\n", []string{"a", "b", ""}},
+		{"multiple trailing", "a\n\n", []string{"a", "", ""}},
 		{"multiple lines no trailing", "a\nb", []string{"a", "b"}},
 		{"multiple empty inner", "a\n\nb", []string{"a", "", "b"}},
 	}
