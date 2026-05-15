@@ -31,7 +31,8 @@ func TestGitCommandsArgumentInjection(t *testing.T) {
 			}
 
 			// Add a dummy commit so push/pull/merge don't immediately fail due to empty repo
-			if _, _, err := g.runSeparate("commit", "--allow-empty", "-m", "init"); err != nil {
+			// We pass user.name and user.email inline to avoid "Author identity unknown" in CI
+			if _, _, err := g.runSeparate("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init"); err != nil {
 				t.Fatalf("failed to create commit: %v", err)
 			}
 
