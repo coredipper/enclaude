@@ -26,8 +26,8 @@ var remoteAddCmd = &cobra.Command{
 		}
 
 		// Register merge driver
-		driverCmd := "enclaude merge-driver manifest %O %A %B"
-		if err := git.ConfigMergeDriver("enclaude-manifest", driverCmd); err != nil {
+		driverArgs := []string{"merge-driver", "manifest", "%O", "%A", "%B"}
+		if err := git.ConfigMergeDriver("enclaude-manifest", driverArgs); err != nil {
 			fmt.Printf("Warning: could not register merge driver: %v\n", err)
 		}
 
