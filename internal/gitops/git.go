@@ -85,13 +85,23 @@ func (g *Git) MergeAbort() error {
 	return err
 }
 
-// RemoteAdd adds a git remote.
-func (g *Git) RemoteAdd(name, url string) error {
-	// The ext:: transport runs an arbitrary command on fetch/push, so a
-	// remote URL using it is a code-execution vector even when passed as a
-	// safe positional — the -- separator above cannot neutralize it.
+// rejectUnsafeRemoteURL blocks remote URLs whose transport executes an
+// arbitrary command. ext:: runs its argument as a shell command on every
+// fetch/push, so it is a code-execution vector regardless of how safely
+// the URL is passed as a positional — the -- separator cannot neutralize
+// a valid-but-malicious positional. Called from every path that records a
+// remote URL (add and set-url) so the guard can't be bypassed by editing.
+func rejectUnsafeRemoteURL(url string) error {
 	if strings.HasPrefix(url, "ext::") {
 		return fmt.Errorf("refusing remote with ext:: URL (arbitrary command execution transport): %s", url)
+	}
+	return nil
+}
+
+// RemoteAdd adds a git remote.
+func (g *Git) RemoteAdd(name, url string) error {
+	if err := rejectUnsafeRemoteURL(url); err != nil {
+		return err
 	}
 	_, err := g.run("remote", "add", "--", name, url)
 	return err
@@ -110,6 +120,9 @@ func (g *Git) RemoteRemove(name string) error {
 
 // RemoteSetURL updates the URL of an existing git remote.
 func (g *Git) RemoteSetURL(name, url string) error {
+	if err := rejectUnsafeRemoteURL(url); err != nil {
+		return err
+	}
 	_, err := g.run("remote", "set-url", "--", name, url)
 	return err
 }

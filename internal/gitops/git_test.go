@@ -79,29 +79,55 @@ func TestGitOptionInjectionMitigation(t *testing.T) {
 	})
 }
 
-// TestRemoteAddRejectsExtTransport guards the ext:: git transport, which
+// TestRemoteRejectsExtTransport guards the ext:: git transport, which
 // executes an arbitrary command on fetch/push. The -- option separator
 // cannot neutralize this because the URL is a valid positional, not an
-// option — so RemoteAdd must reject it explicitly.
-func TestRemoteAddRejectsExtTransport(t *testing.T) {
-	g := New(t.TempDir())
-	if err := g.Init(); err != nil {
-		t.Fatalf("Init failed: %v", err)
-	}
+// option. Every path that records a remote URL must reject it — guarding
+// only RemoteAdd would leave the set-url edit path as a bypass (add a
+// benign remote, then point it at ext:: afterwards).
+func TestRemoteRejectsExtTransport(t *testing.T) {
+	const extURL = "ext::sh -c 'touch pwned'"
 
-	err := g.RemoteAdd("evil", "ext::sh -c 'touch pwned'")
-	if err == nil {
-		t.Fatal("RemoteAdd accepted an ext:: URL; expected rejection")
-	}
-	if !strings.Contains(err.Error(), "ext::") {
-		t.Errorf("rejection error should mention ext::, got: %v", err)
-	}
+	t.Run("RemoteAdd", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		err := g.RemoteAdd("evil", extURL)
+		if err == nil {
+			t.Fatal("RemoteAdd accepted an ext:: URL; expected rejection")
+		}
+		if !strings.Contains(err.Error(), "ext::") {
+			t.Errorf("rejection error should mention ext::, got: %v", err)
+		}
+		// A benign URL must still be accepted (records config only, no
+		// network), so the guard doesn't over-reject.
+		if err := g.RemoteAdd("origin", "https://example.invalid/r.git"); err != nil {
+			t.Fatalf("RemoteAdd rejected a benign https URL: %v", err)
+		}
+	})
 
-	// A benign URL must still be accepted (remote add records config only,
-	// no network), so the guard doesn't over-reject.
-	if err := g.RemoteAdd("origin", "https://example.invalid/r.git"); err != nil {
-		t.Fatalf("RemoteAdd rejected a benign https URL: %v", err)
-	}
+	t.Run("RemoteSetURL bypass is closed", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		// Bypass attempt: add a benign remote, then edit it to ext::.
+		if err := g.RemoteAdd("origin", "https://example.invalid/r.git"); err != nil {
+			t.Fatalf("benign RemoteAdd failed: %v", err)
+		}
+		err := g.RemoteSetURL("origin", extURL)
+		if err == nil {
+			t.Fatal("RemoteSetURL accepted an ext:: URL; the add-then-edit bypass is open")
+		}
+		if !strings.Contains(err.Error(), "ext::") {
+			t.Errorf("rejection error should mention ext::, got: %v", err)
+		}
+		// A benign re-point must still work.
+		if err := g.RemoteSetURL("origin", "https://example.invalid/r2.git"); err != nil {
+			t.Fatalf("RemoteSetURL rejected a benign https URL: %v", err)
+		}
+	})
 }
 
 func TestConfigMergeDriverQuoting(t *testing.T) {
