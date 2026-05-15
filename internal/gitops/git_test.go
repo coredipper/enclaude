@@ -2,9 +2,133 @@ package gitops
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestGitOptionInjectionMitigation(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Init base repo
+	baseDir := filepath.Join(tmpDir, "base")
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	baseGit := New(baseDir)
+	if err := baseGit.Init(); err != nil {
+		t.Fatal(err)
+	}
+	// Configure git for CI environments where user is not set
+	if _, err := baseGit.run("config", "user.name", "Test User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := baseGit.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	f := filepath.Join(baseDir, "file.txt")
+	if err := os.WriteFile(f, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := baseGit.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if err := baseGit.Commit("initial"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test Add with dashed file
+	t.Run("Add dashed file", func(t *testing.T) {
+		dashedFile := filepath.Join(baseDir, "-f")
+		if err := os.WriteFile(dashedFile, []byte("test"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		err := baseGit.Add("-f")
+		if err != nil {
+			t.Fatalf("Add failed, possibly interpreted as flag: %v", err)
+		}
+
+		// Verify '-f' is actually added by checking git status
+		out, err := baseGit.run("status", "--porcelain")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "A  -f") {
+			t.Errorf("Expected dashed file to be added, got status: %q", out)
+		}
+	})
+
+	// Test remote with dashed name
+	t.Run("RemoteAdd dashed name", func(t *testing.T) {
+		err := baseGit.RemoteAdd("--upload-pack=exploit", "http://example.com")
+		if err != nil {
+			t.Fatalf("RemoteAdd failed to create remote with dashed name: %v", err)
+		}
+
+		// Verify remote was created with the literal dashed name
+		out, err := baseGit.RemoteList()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "--upload-pack=exploit") {
+			t.Errorf("Expected remote to be created with dashed name, got: %q", out)
+		}
+	})
+}
+
+// TestRemoteRejectsExtTransport guards the ext:: git transport, which
+// executes an arbitrary command on fetch/push. The -- option separator
+// cannot neutralize this because the URL is a valid positional, not an
+// option. Every path that records a remote URL must reject it — guarding
+// only RemoteAdd would leave the set-url edit path as a bypass (add a
+// benign remote, then point it at ext:: afterwards).
+func TestRemoteRejectsExtTransport(t *testing.T) {
+	const extURL = "ext::sh -c 'touch pwned'"
+
+	t.Run("RemoteAdd", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		err := g.RemoteAdd("evil", extURL)
+		if err == nil {
+			t.Fatal("RemoteAdd accepted an ext:: URL; expected rejection")
+		}
+		if !strings.Contains(err.Error(), "ext::") {
+			t.Errorf("rejection error should mention ext::, got: %v", err)
+		}
+		// A benign URL must still be accepted (records config only, no
+		// network), so the guard doesn't over-reject.
+		if err := g.RemoteAdd("origin", "https://example.invalid/r.git"); err != nil {
+			t.Fatalf("RemoteAdd rejected a benign https URL: %v", err)
+		}
+	})
+
+	t.Run("RemoteSetURL bypass is closed", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		// Bypass attempt: add a benign remote, then edit it to ext::.
+		if err := g.RemoteAdd("origin", "https://example.invalid/r.git"); err != nil {
+			t.Fatalf("benign RemoteAdd failed: %v", err)
+		}
+		err := g.RemoteSetURL("origin", extURL)
+		if err == nil {
+			t.Fatal("RemoteSetURL accepted an ext:: URL; the add-then-edit bypass is open")
+		}
+		if !strings.Contains(err.Error(), "ext::") {
+			t.Errorf("rejection error should mention ext::, got: %v", err)
+		}
+		// A benign re-point must still work.
+		if err := g.RemoteSetURL("origin", "https://example.invalid/r2.git"); err != nil {
+			t.Fatalf("RemoteSetURL rejected a benign https URL: %v", err)
+		}
+	})
+}
 
 func TestConfigMergeDriverQuoting(t *testing.T) {
 	tmp := t.TempDir()
