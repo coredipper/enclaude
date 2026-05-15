@@ -111,6 +111,50 @@ func TestScanFilesDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestScanFilesErrors(t *testing.T) {
+	t.Run("PermissionDeniedIncluded", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create a directory that we cannot read
+		noPermsDir := filepath.Join(dir, "noperms")
+		if err := os.Mkdir(noPermsDir, 0000); err != nil {
+			t.Fatalf("failed to create directory: %v", err)
+		}
+		// Ensure we clean up the directory by restoring permissions so t.TempDir() can be removed
+		defer os.Chmod(noPermsDir, 0755)
+
+		_, err := ScanFiles(dir, []string{"**"}, nil)
+		if err == nil {
+			t.Fatal("expected error for inaccessible directory")
+		}
+		if err.Error() != "scan incomplete: 1 inaccessible file(s)" {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("PermissionDeniedExcluded", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create a directory that we cannot read
+		noPermsDir := filepath.Join(dir, "noperms")
+		if err := os.Mkdir(noPermsDir, 0000); err != nil {
+			t.Fatalf("failed to create directory: %v", err)
+		}
+		// Ensure we clean up the directory by restoring permissions so t.TempDir() can be removed
+		defer os.Chmod(noPermsDir, 0755)
+
+		// Exclude the inaccessible directory
+		excludes := []string{"noperms/**"}
+		results, err := ScanFiles(dir, []string{"**"}, excludes)
+		if err != nil {
+			t.Fatalf("expected no error when inaccessible directory is excluded, got: %v", err)
+		}
+		if len(results) != 0 {
+			t.Errorf("expected no results, got %d", len(results))
+		}
+	})
+}
+
 func TestMatchGlob(t *testing.T) {
 	tests := []struct {
 		path    string
