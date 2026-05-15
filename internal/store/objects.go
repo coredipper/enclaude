@@ -22,7 +22,6 @@ func NewObjectStore(sealDir string) *ObjectStore {
 // ContentHash computes the SHA-256 hash of plaintext content.
 func ContentHash(data []byte) string {
 	h := sha256.Sum256(data)
-	// Optimize hash encoding: hex.EncodeToString is ~2x faster and allocates less than fmt.Sprintf("%x")
 	return hex.EncodeToString(h[:])
 }
 

@@ -131,19 +131,16 @@ func hashNormalized(line string) string {
 	if err := json.Unmarshal([]byte(line), &obj); err != nil {
 		// Not valid JSON — hash the raw line
 		h := sha256.Sum256([]byte(line))
-		// Optimize hash encoding: hex.EncodeToString is ~2x faster and allocates less than fmt.Sprintf("%x")
 		return hex.EncodeToString(h[:])
 	}
 
 	normalized, err := json.Marshal(obj)
 	if err != nil {
 		h := sha256.Sum256([]byte(line))
-		// Optimize hash encoding: hex.EncodeToString is ~2x faster and allocates less than fmt.Sprintf("%x")
 		return hex.EncodeToString(h[:])
 	}
 
 	h := sha256.Sum256(normalized)
-	// Optimize hash encoding: hex.EncodeToString is ~2x faster and allocates less than fmt.Sprintf("%x")
 	return hex.EncodeToString(h[:])
 }
 
