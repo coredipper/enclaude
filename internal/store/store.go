@@ -6,7 +6,9 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"filippo.io/age"
@@ -441,15 +443,39 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 
 	// Build a "current" manifest from disk
 	current := NewManifest(cfg.Seal.DeviceID)
-	for _, f := range files {
-		data, err := os.ReadFile(f.AbsPath)
-		if err != nil {
-			continue
-		}
-		current.Files[f.RelPath] = FileEntry{
-			ContentHash: ContentHash(data),
-		}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > 16 {
+		numWorkers = 16
 	}
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+	sem := make(chan struct{}, numWorkers)
+
+	for _, f := range files {
+		wg.Add(1)
+		go func(f ScanResult) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			data, err := os.ReadFile(f.AbsPath)
+			if err != nil {
+				return
+			}
+			hash := ContentHash(data)
+
+			mu.Lock()
+			current.Files[f.RelPath] = FileEntry{
+				ContentHash: hash,
+			}
+			mu.Unlock()
+		}(f)
+	}
+	wg.Wait()
 
 	diff := current.Diff(manifest)
 	return &diff, nil
@@ -480,13 +506,37 @@ func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
 
 	// Build current state from disk
 	onDisk := make(map[string]string) // relPath -> hash
-	for _, f := range files {
-		data, err := os.ReadFile(f.AbsPath)
-		if err != nil {
-			continue
-		}
-		onDisk[f.RelPath] = ContentHash(data)
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers > 16 {
+		numWorkers = 16
 	}
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+	sem := make(chan struct{}, numWorkers)
+
+	for _, f := range files {
+		wg.Add(1)
+		go func(f ScanResult) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			data, err := os.ReadFile(f.AbsPath)
+			if err != nil {
+				return
+			}
+			hash := ContentHash(data)
+
+			mu.Lock()
+			onDisk[f.RelPath] = hash
+			mu.Unlock()
+		}(f)
+	}
+	wg.Wait()
 
 	var result DiffResult
 
