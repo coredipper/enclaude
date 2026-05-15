@@ -7,6 +7,7 @@ import (
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/gitops"
+	"github.com/coredipper/enclaude/internal/merge"
 	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -66,7 +67,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 		if err := git.Commit(msg); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
-		fmt.Printf("  %s\n", sealStats)
+		fmt.Println(sealStats.Multiline("  "))
 	} else {
 		fmt.Println("  No local changes.")
 	}
@@ -75,20 +76,20 @@ func runPull(cmd *cobra.Command, args []string) error {
 	branch, _ := git.CurrentBranch()
 	fmt.Printf("Pulling from %s/%s...\n", remote, branch)
 
-	out, err := git.Pull(remote, branch)
+	pullStats, pullOut, err := git.Pull(remote, branch)
 	if err != nil {
-		if strings.Contains(out, "CONFLICT") {
+		if strings.Contains(pullOut, "CONFLICT") {
 			fmt.Println("  Merge conflicts detected. The merge driver should have resolved manifest conflicts.")
 			fmt.Println("  If issues remain, run 'enclaude repair'.")
 		} else {
-			return fmt.Errorf("pull failed: %w\n%s", err, out)
+			return fmt.Errorf("pull failed: %w\n%s", err, pullOut)
 		}
 	}
 
-	if strings.Contains(out, "Already up to date") {
-		fmt.Println("  Already up to date.")
-	} else {
-		fmt.Printf("  %s\n", out)
+	mergeAgg := merge.ParseDriverLines(pullOut)
+	fmt.Println(formatPullLine("  ", pullStats, mergeAgg))
+	if pullStats.UpToDate {
+		return nil
 	}
 
 	// Unseal merged state
@@ -102,7 +103,8 @@ func runPull(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("unseal: %w", err)
 	}
-	fmt.Printf("  %s\n", unsealStats)
+	unsealStats.Merges = mergeAgg
+	fmt.Println(unsealStats.Multiline("  "))
 
 	return nil
 }

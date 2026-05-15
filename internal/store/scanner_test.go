@@ -12,24 +12,24 @@ func setupTestDir(t *testing.T) string {
 
 	// Create a mock ~/.claude/ structure
 	files := map[string]string{
-		"history.jsonl":                                 `{"display":"test","timestamp":1}`,
-		"settings.json":                                 `{"hooks":{}}`,
-		"settings.local.json":                           `{"perms":{}}`,
-		"stats-cache.json":                              `{"version":2}`,
-		"CLAUDE.md":                                     "# test",
-		"projects/proj-a/abc123.jsonl":                  `{"type":"user"}`,
-		"projects/proj-a/sessions-index.json":           `{"entries":[]}`,
-		"projects/proj-a/memory/MEMORY.md":              "# memory",
-		"projects/proj-a/memory/user_role.md":           "---\nname: role\n---",
-		"projects/proj-a/subagents/agent-abc.meta.json": `{"agentType":"Explore"}`,
-		"projects/proj-a/subagents/agent-abc.jsonl":     `{"type":"user"}`,
-		"statsig/statsig.cached.evaluations":            "big cache",
-		"plugins/marketplace/plugin.json":               "{}",
-		"plugins/blocklist.json":                        "{}",
-		"debug/session.log":                             "log data",
-		"shell-snapshots/snap1.json":                    "{}",
-		"hooks/myhook.sh":                               "#!/bin/bash",
-		"todos/task1/state.json":                        "{}",
+		"history.jsonl":                                   `{"display":"test","timestamp":1}`,
+		"settings.json":                                   `{"hooks":{}}`,
+		"settings.local.json":                             `{"perms":{}}`,
+		"stats-cache.json":                                `{"version":2}`,
+		"CLAUDE.md":                                       "# test",
+		"projects/proj-a/abc123.jsonl":                    `{"type":"user"}`,
+		"projects/proj-a/sessions-index.json":             `{"entries":[]}`,
+		"projects/proj-a/memory/MEMORY.md":                "# memory",
+		"projects/proj-a/memory/user_role.md":             "---\nname: role\n---",
+		"projects/proj-a/subagents/agent-abc.meta.json":   `{"agentType":"Explore"}`,
+		"projects/proj-a/subagents/agent-abc.jsonl":       `{"type":"user"}`,
+		"statsig/statsig.cached.evaluations":              "big cache",
+		"plugins/marketplace/plugin.json":                 "{}",
+		"plugins/blocklist.json":                          "{}",
+		"debug/session.log":                               "log data",
+		"shell-snapshots/snap1.json":                      "{}",
+		"hooks/myhook.sh":                                 "#!/bin/bash",
+		"todos/task1/state.json":                          "{}",
 	}
 
 	for path, content := range files {
@@ -109,6 +109,52 @@ func TestScanFilesDefaultConfig(t *testing.T) {
 			t.Errorf("expected %s to be excluded, but it was included", path)
 		}
 	}
+}
+
+// TestScanFilesErrors verifies that ScanFiles handles inaccessible directories appropriately,
+// correctly distinguishing between permission errors in included vs. excluded paths.
+func TestScanFilesErrors(t *testing.T) {
+	t.Run("PermissionDeniedIncluded", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create a directory that we cannot read
+		noPermsDir := filepath.Join(dir, "noperms")
+		if err := os.Mkdir(noPermsDir, 0000); err != nil {
+			t.Fatalf("failed to create directory: %v", err)
+		}
+		// Ensure we clean up the directory by restoring permissions so t.TempDir() can be removed
+		defer os.Chmod(noPermsDir, 0755)
+
+		_, err := ScanFiles(dir, []string{"**"}, nil)
+		if err == nil {
+			t.Fatal("expected error for inaccessible directory")
+		}
+		if err.Error() != "scan incomplete: 1 inaccessible file(s)" {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("PermissionDeniedExcluded", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// Create a directory that we cannot read
+		noPermsDir := filepath.Join(dir, "noperms")
+		if err := os.Mkdir(noPermsDir, 0000); err != nil {
+			t.Fatalf("failed to create directory: %v", err)
+		}
+		// Ensure we clean up the directory by restoring permissions so t.TempDir() can be removed
+		defer os.Chmod(noPermsDir, 0755)
+
+		// Exclude the inaccessible directory
+		excludes := []string{"noperms/**"}
+		results, err := ScanFiles(dir, []string{"**"}, excludes)
+		if err != nil {
+			t.Fatalf("expected no error when inaccessible directory is excluded, got: %v", err)
+		}
+		if len(results) != 0 {
+			t.Errorf("expected no results, got %d", len(results))
+		}
+	})
 }
 
 func TestMatchGlob(t *testing.T) {
