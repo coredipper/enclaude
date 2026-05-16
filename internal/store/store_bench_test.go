@@ -22,13 +22,22 @@ func BenchmarkStatus(b *testing.B) {
 	os.MkdirAll(claudeDir, 0755)
 	os.MkdirAll(sealDir, 0755)
 
+	manifest := NewManifest("test-device")
+
 	for i := 0; i < 1000; i++ {
 		content := make([]byte, 100*1024)
 		rand.Read(content)
-		os.WriteFile(filepath.Join(claudeDir, fmt.Sprintf("file-%d.txt", i)), content, 0644)
+		path := filepath.Join(claudeDir, fmt.Sprintf("file-%d.txt", i))
+		os.WriteFile(path, content, 0644)
+		info, _ := os.Stat(path)
+
+		manifest.Files[fmt.Sprintf("file-%d.txt", i)] = FileEntry{
+			ContentHash:   ContentHash(content),
+			SizePlaintext: info.Size(),
+			Mtime:         info.ModTime().UTC().Format("2006-01-02T15:04:05Z"),
+		}
 	}
 
-	manifest := NewManifest("test-device")
 	manifest.Save(sealDir)
 
 	cfg := &config.Config{
@@ -56,13 +65,22 @@ func BenchmarkUnsealStatus(b *testing.B) {
 	os.MkdirAll(claudeDir, 0755)
 	os.MkdirAll(sealDir, 0755)
 
+	manifest := NewManifest("test-device")
+
 	for i := 0; i < 1000; i++ {
 		content := make([]byte, 100*1024)
 		rand.Read(content)
-		os.WriteFile(filepath.Join(claudeDir, fmt.Sprintf("file-%d.txt", i)), content, 0644)
+		path := filepath.Join(claudeDir, fmt.Sprintf("file-%d.txt", i))
+		os.WriteFile(path, content, 0644)
+		info, _ := os.Stat(path)
+
+		manifest.Files[fmt.Sprintf("file-%d.txt", i)] = FileEntry{
+			ContentHash:   ContentHash(content),
+			SizePlaintext: info.Size(),
+			Mtime:         info.ModTime().UTC().Format("2006-01-02T15:04:05Z"),
+		}
 	}
 
-	manifest := NewManifest("test-device")
 	manifest.Save(sealDir)
 
 	cfg := &config.Config{
