@@ -15,6 +15,15 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed on:"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - run: go test ./... -count=1
 
   build:
