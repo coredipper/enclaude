@@ -28,16 +28,16 @@ type SessionStats struct {
 
 // SealStats tracks what happened during a seal operation.
 type SealStats struct {
-	Scanned         int
-	Added           int
-	Modified        int
-	Deleted         int
-	Unchanged       int
-	Errors          int
-	BytesPlaintext  int64
-	BytesEncrypted  int64
-	Sessions        SessionStats
-	Elapsed         time.Duration
+	Scanned        int
+	Added          int
+	Modified       int
+	Deleted        int
+	Unchanged      int
+	Errors         int
+	BytesPlaintext int64
+	BytesEncrypted int64
+	Sessions       SessionStats
+	Elapsed        time.Duration
 }
 
 // HasChanges returns true if the seal produced any modifications worth committing.
@@ -80,14 +80,14 @@ func (s SealStats) Multiline(indent string) string {
 
 // UnsealStats tracks what happened during an unseal operation.
 type UnsealStats struct {
-	Total           int
-	Restored        int
-	Unchanged       int
-	Deleted         int
-	Errors          int
-	BytesDecrypted  int64
-	Merges          merge.Aggregate
-	Elapsed         time.Duration
+	Total          int
+	Restored       int
+	Unchanged      int
+	Deleted        int
+	Errors         int
+	BytesDecrypted int64
+	Merges         merge.Aggregate
+	Elapsed        time.Duration
 }
 
 // String returns a compact single-line summary.
@@ -427,7 +427,6 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 
 	return stats, nil
 }
-
 
 // Status returns the diff between the current claude directory and the seal manifest.
 func Status(cfg *config.Config) (*DiffResult, error) {
