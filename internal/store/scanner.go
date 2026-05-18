@@ -28,7 +28,8 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 	compiledIncludes := compilePatterns(includes)
 	compiledExcludes := compilePatterns(excludes)
 
-	err := filepath.Walk(claudeDir, func(path string, info os.FileInfo, err error) error {
+	// Optimization: Use WalkDir instead of Walk to avoid unnecessary Lstat calls for every file.
+	err := filepath.WalkDir(claudeDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			// Count errors for paths that could contain managed files.
 			// For directories: any non-excluded dir could have included
@@ -41,7 +42,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 			}
 			return nil // continue scanning other files
 		}
-		if info.IsDir() {
+		if d.IsDir() {
 			rel, _ := filepath.Rel(claudeDir, path)
 			if rel == "." {
 				return nil
@@ -65,6 +66,13 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 
 		// Check include
 		if !matchesAnyCompiled(rel, compiledIncludes) {
+			return nil
+		}
+
+		// Optimization: Only fetch FileInfo (which does an Lstat) after we know we want to include this file.
+		info, err := d.Info()
+		if err != nil {
+			walkErrors++
 			return nil
 		}
 
