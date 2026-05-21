@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/coredipper/enclaude/internal/config"
 )
@@ -29,6 +30,15 @@ func BenchmarkStatus(b *testing.B) {
 	}
 
 	manifest := NewManifest("test-device")
+	for i := 0; i < 1000; i++ {
+		path := fmt.Sprintf("file-%d.txt", i)
+		info, _ := os.Stat(filepath.Join(claudeDir, path))
+		manifest.Files[path] = FileEntry{
+			ContentHash:   "mock-hash",
+			SizePlaintext: info.Size(),
+			Mtime:         time.UnixMilli(info.ModTime().UnixMilli()).UTC().Format(time.RFC3339),
+		}
+	}
 	manifest.Save(sealDir)
 
 	cfg := &config.Config{
@@ -63,6 +73,15 @@ func BenchmarkUnsealStatus(b *testing.B) {
 	}
 
 	manifest := NewManifest("test-device")
+	for i := 0; i < 1000; i++ {
+		path := fmt.Sprintf("file-%d.txt", i)
+		info, _ := os.Stat(filepath.Join(claudeDir, path))
+		manifest.Files[path] = FileEntry{
+			ContentHash:   "mock-hash",
+			SizePlaintext: info.Size(),
+			Mtime:         time.UnixMilli(info.ModTime().UnixMilli()).UTC().Format(time.RFC3339),
+		}
+	}
 	manifest.Save(sealDir)
 
 	cfg := &config.Config{

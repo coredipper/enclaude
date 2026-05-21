@@ -461,6 +461,17 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
+			// Fast path optimization: if size and mtime match manifest, assume unchanged
+			fMtime := time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339)
+			if entry, ok := manifest.Files[f.RelPath]; ok {
+				if entry.SizePlaintext == f.Size && entry.Mtime == fMtime {
+					mu.Lock()
+					current.Files[f.RelPath] = entry
+					mu.Unlock()
+					return
+				}
+			}
+
 			data, err := os.ReadFile(f.AbsPath)
 			if err != nil {
 				return
@@ -523,6 +534,17 @@ func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+
+			// Fast path optimization: if size and mtime match manifest, assume unchanged
+			fMtime := time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339)
+			if entry, ok := manifest.Files[f.RelPath]; ok {
+				if entry.SizePlaintext == f.Size && entry.Mtime == fMtime {
+					mu.Lock()
+					onDisk[f.RelPath] = entry.ContentHash
+					mu.Unlock()
+					return
+				}
+			}
 
 			data, err := os.ReadFile(f.AbsPath)
 			if err != nil {
