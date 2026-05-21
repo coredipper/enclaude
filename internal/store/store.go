@@ -244,7 +244,8 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 			ContentHash:     hash,
 			SizePlaintext:   f.Size,
 			SizeEncrypted:   int64(len(encrypted)),
-			Mtime:           time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
+			Mtime:           time.Unix(0, f.ModTimeNs).UTC().Format(time.RFC3339),
+			ModTimeNs:       f.ModTimeNs,
 			MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
 			JSONLLineCount:  lineCount,
 			SessionComplete: isSessionCompleteFor(f.RelPath, activeSessions),
@@ -434,6 +435,12 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
+	// Uninitialized seal store: treat as empty so the fast path can dereference
+	// manifest.Files safely. Diff semantics are unchanged (everything on disk
+	// reports as Added either way).
+	if manifest == nil {
+		manifest = NewManifest(cfg.Seal.DeviceID)
+	}
 
 	files, err := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 	if err != nil {
@@ -460,6 +467,20 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+
+			// Fast path: if size and nanosecond mtime match manifest, assume
+			// unchanged and reuse the stored hash. ModTimeNs==0 means the
+			// manifest was written by a version that didn't store nanosecond
+			// precision — fall through to hashing in that case rather than
+			// trust an unset value.
+			if entry, ok := manifest.Files[f.RelPath]; ok && entry.ModTimeNs != 0 {
+				if entry.SizePlaintext == f.Size && entry.ModTimeNs == f.ModTimeNs {
+					mu.Lock()
+					current.Files[f.RelPath] = entry
+					mu.Unlock()
+					return
+				}
+			}
 
 			data, err := os.ReadFile(f.AbsPath)
 			if err != nil {
@@ -523,6 +544,17 @@ func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+
+			// Fast path: see Status above for the rationale and the
+			// ModTimeNs==0 guard against legacy manifests.
+			if entry, ok := manifest.Files[f.RelPath]; ok && entry.ModTimeNs != 0 {
+				if entry.SizePlaintext == f.Size && entry.ModTimeNs == f.ModTimeNs {
+					mu.Lock()
+					onDisk[f.RelPath] = entry.ContentHash
+					mu.Unlock()
+					return
+				}
+			}
 
 			data, err := os.ReadFile(f.AbsPath)
 			if err != nil {
@@ -786,6 +818,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 		// Update Mtime from current file stat (important for last_write_wins)
 		if info, err := os.Stat(absPath); err == nil {
 			entry.Mtime = info.ModTime().UTC().Format(time.RFC3339)
+			entry.ModTimeNs = info.ModTime().UnixNano()
 		}
 		// Recompute JSONL line count
 		if strings.HasSuffix(path, ".jsonl") {
