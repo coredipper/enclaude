@@ -119,6 +119,34 @@ git push https://github.com/<fork-owner>/enclaude.git <local>:<branch>
 
 Check the flag first: `gh pr view <num> --json maintainerCanModify`.
 
+## Multi-agent PR workflow
+
+Multiple AI coding agents author PRs on this repo locally and push under
+the maintainer's git identity, so `gh pr list` always shows
+`coredipper` as author. To attribute correctly, look at the branch-name
+prefix and title emoji together:
+
+| Branch prefix | Agent    | Domain                    | Title emoji |
+|---------------|----------|---------------------------|-------------|
+| `bolt-*`      | Bolt     | Performance optimizations | ⚡           |
+| `sentinel-*`  | Sentinel | Security fixes            | 🛡️ / 🔒     |
+| `jules-*`     | Jules    | Refactoring / code health | 🧹           |
+
+When asked to "review the latest Bolt/Sentinel/Jules PR(s)", filter on
+`headRefName` prefix — author filtering returns nothing useful. PR bodies
+usually also carry an "PR created automatically by …" footer that
+confirms the agent. Older PRs (pre-`jules-*`) used inconsistent prefixes
+like `refactor-*` or `code-health/*`; for those, fall back to emoji +
+body.
+
+A separate review daemon, `codex`, runs autoreviews via the local
+`roborev` CLI: `roborev fix --open --list` enumerates open jobs,
+`roborev show --job <id> --json` fetches a review (findings live under
+`.output`; verdict under `.job.verdict`), and the fix loop closes with
+`roborev comment --commenter roborev-fix --job <id> "<summary>"` then
+`roborev close <id>`. Each push to a branch typically triggers a fresh
+review.
+
 ## Local conventions
 
 - Comments explain *why*, not *what*. Don't pin issue / PR numbers or
