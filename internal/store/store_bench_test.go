@@ -36,8 +36,8 @@ func BenchmarkStatus(b *testing.B) {
 		manifest.Files[path] = FileEntry{
 			ContentHash:   "mock-hash",
 			SizePlaintext: info.Size(),
-			Mtime:         time.UnixMilli(info.ModTime().UnixMilli()).UTC().Format(time.RFC3339),
-			ModTimeMs:     info.ModTime().UnixMilli(),
+			Mtime:         info.ModTime().UTC().Format(time.RFC3339),
+			ModTimeNs:     info.ModTime().UnixNano(),
 		}
 	}
 	manifest.Save(sealDir)
@@ -80,8 +80,8 @@ func BenchmarkUnsealStatus(b *testing.B) {
 		manifest.Files[path] = FileEntry{
 			ContentHash:   "mock-hash",
 			SizePlaintext: info.Size(),
-			Mtime:         time.UnixMilli(info.ModTime().UnixMilli()).UTC().Format(time.RFC3339),
-			ModTimeMs:     info.ModTime().UnixMilli(),
+			Mtime:         info.ModTime().UTC().Format(time.RFC3339),
+			ModTimeNs:     info.ModTime().UnixNano(),
 		}
 	}
 	manifest.Save(sealDir)

@@ -15,8 +15,8 @@ type ScanResult struct {
 	AbsPath string
 	// Size in bytes.
 	Size int64
-	// ModTime as Unix timestamp (milliseconds).
-	ModTimeMs int64
+	// ModTime as Unix timestamp (nanoseconds).
+	ModTimeNs int64
 }
 
 // ScanFiles walks the claude directory and returns files matching
@@ -80,7 +80,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 			RelPath:   rel,
 			AbsPath:   path,
 			Size:      info.Size(),
-			ModTimeMs: info.ModTime().UnixMilli(),
+			ModTimeNs: info.ModTime().UnixNano(),
 		})
 		return nil
 	})
