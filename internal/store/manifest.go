@@ -22,6 +22,11 @@ type FileEntry struct {
 	SizePlaintext int64  `json:"size_plaintext"`
 	SizeEncrypted int64  `json:"size_encrypted"`
 	Mtime         string `json:"mtime"`
+	// ModTimeMs is the file's mtime in milliseconds since epoch. Stored
+	// alongside Mtime so the Status/UnsealStatus fast path can compare with
+	// sub-second precision (RFC3339 truncates to seconds, which would let
+	// same-second content changes slip past the fast path).
+	ModTimeMs     int64  `json:"mtime_ms,omitempty"`
 	MergeStrategy string `json:"merge_strategy"`
 	// For JSONL files, track line count for efficient dedup merge
 	JSONLLineCount int `json:"jsonl_line_count,omitempty"`

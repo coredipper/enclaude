@@ -245,6 +245,7 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 			SizePlaintext:   f.Size,
 			SizeEncrypted:   int64(len(encrypted)),
 			Mtime:           time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339),
+			ModTimeMs:       f.ModTimeMs,
 			MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
 			JSONLLineCount:  lineCount,
 			SessionComplete: isSessionCompleteFor(f.RelPath, activeSessions),
@@ -461,10 +462,13 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			// Fast path optimization: if size and mtime match manifest, assume unchanged
-			fMtime := time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339)
-			if entry, ok := manifest.Files[f.RelPath]; ok {
-				if entry.SizePlaintext == f.Size && entry.Mtime == fMtime {
+			// Fast path: if size and millisecond mtime match manifest, assume
+			// unchanged and reuse the stored hash. ModTimeMs==0 means the
+			// manifest was written by a version that didn't store millisecond
+			// precision — fall through to hashing in that case rather than
+			// trust an unset value.
+			if entry, ok := manifest.Files[f.RelPath]; ok && entry.ModTimeMs != 0 {
+				if entry.SizePlaintext == f.Size && entry.ModTimeMs == f.ModTimeMs {
 					mu.Lock()
 					current.Files[f.RelPath] = entry
 					mu.Unlock()
@@ -535,10 +539,10 @@ func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			// Fast path optimization: if size and mtime match manifest, assume unchanged
-			fMtime := time.UnixMilli(f.ModTimeMs).UTC().Format(time.RFC3339)
-			if entry, ok := manifest.Files[f.RelPath]; ok {
-				if entry.SizePlaintext == f.Size && entry.Mtime == fMtime {
+			// Fast path: see Status above for the rationale and the
+			// ModTimeMs==0 guard against legacy manifests.
+			if entry, ok := manifest.Files[f.RelPath]; ok && entry.ModTimeMs != 0 {
+				if entry.SizePlaintext == f.Size && entry.ModTimeMs == f.ModTimeMs {
 					mu.Lock()
 					onDisk[f.RelPath] = entry.ContentHash
 					mu.Unlock()
@@ -808,6 +812,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 		// Update Mtime from current file stat (important for last_write_wins)
 		if info, err := os.Stat(absPath); err == nil {
 			entry.Mtime = info.ModTime().UTC().Format(time.RFC3339)
+			entry.ModTimeMs = info.ModTime().UnixMilli()
 		}
 		// Recompute JSONL line count
 		if strings.HasSuffix(path, ".jsonl") {
