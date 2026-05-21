@@ -29,6 +29,27 @@ func fastPathFixture(t *testing.T, content []byte) (*config.Config, string) {
 	return cfg, filePath
 }
 
+// TestStatus_NoManifest_ReportsAllAsAdded guards against a panic that the
+// fast path would otherwise raise on an uninitialized seal store: LoadManifest
+// returns (nil, nil) when manifest.json is absent, and the fast path
+// dereferences manifest.Files. Status must coerce nil to an empty manifest
+// and report every on-disk file as Added.
+func TestStatus_NoManifest_ReportsAllAsAdded(t *testing.T) {
+	cfg, _ := fastPathFixture(t, []byte("hello world"))
+	// No manifest is written to cfg.Seal.SealDir — simulate "init never ran".
+
+	diff, err := Status(cfg)
+	if err != nil {
+		t.Fatalf("Status returned error on missing manifest: %v", err)
+	}
+	if len(diff.Added) != 1 || diff.Added[0] != "data.txt" {
+		t.Fatalf("expected [data.txt] as Added, got %+v", diff)
+	}
+	if len(diff.Modified)+len(diff.Deleted) != 0 {
+		t.Fatalf("expected no Modified/Deleted entries, got %+v", diff)
+	}
+}
+
 // TestStatus_FastPath_SizeAndMtimeMatch_ReusesManifestHash verifies that when
 // a file's size and nanosecond mtime match the manifest, Status reuses the
 // stored hash without reading the file. We prove the file wasn't read by

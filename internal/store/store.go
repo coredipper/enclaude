@@ -435,6 +435,12 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
+	// Uninitialized seal store: treat as empty so the fast path can dereference
+	// manifest.Files safely. Diff semantics are unchanged (everything on disk
+	// reports as Added either way).
+	if manifest == nil {
+		manifest = NewManifest(cfg.Seal.DeviceID)
+	}
 
 	files, err := ScanFiles(cfg.Seal.ClaudeDir, cfg.Include.Patterns, cfg.Exclude.Patterns)
 	if err != nil {
