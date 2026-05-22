@@ -64,17 +64,11 @@ func TestGitOptionInjectionMitigation(t *testing.T) {
 	// Test remote with dashed name
 	t.Run("RemoteAdd dashed name", func(t *testing.T) {
 		err := baseGit.RemoteAdd("--upload-pack=exploit", "http://example.com")
-		if err != nil {
-			t.Fatalf("RemoteAdd failed to create remote with dashed name: %v", err)
+		if err == nil {
+			t.Fatalf("RemoteAdd created remote with dashed name, expected rejection")
 		}
-
-		// Verify remote was created with the literal dashed name
-		out, err := baseGit.RemoteList()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(out, "--upload-pack=exploit") {
-			t.Errorf("Expected remote to be created with dashed name, got: %q", out)
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("Expected rejection due to dash, got: %v", err)
 		}
 	})
 }
@@ -126,6 +120,91 @@ func TestRemoteRejectsExtTransport(t *testing.T) {
 		// A benign re-point must still work.
 		if err := g.RemoteSetURL("origin", "https://example.invalid/r2.git"); err != nil {
 			t.Fatalf("RemoteSetURL rejected a benign https URL: %v", err)
+		}
+	})
+}
+
+// TestRemoteRejectsDashPrefixedArgs covers the dash-prefix input guards: a
+// remote name or URL beginning with "-" is refused before reaching git, so
+// it can't be mistaken for a flag even on a git build that mishandles the --
+// separator. Mirrors the ext:: coverage — every recording path is checked,
+// plus benign inputs to prove the guard doesn't over-reject.
+func TestRemoteRejectsDashPrefixedArgs(t *testing.T) {
+	const dashName = "--upload-pack=exploit"
+	const dashURL = "--upload-pack=exploit"
+	const benignURL = "https://example.invalid/r.git"
+
+	t.Run("RemoteAdd rejects dashed name", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		err := g.RemoteAdd(dashName, benignURL)
+		if err == nil {
+			t.Fatal("RemoteAdd accepted a dash-prefixed name; expected rejection")
+		}
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("rejection error should mention dash, got: %v", err)
+		}
+	})
+
+	t.Run("RemoteAdd rejects dashed URL", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		err := g.RemoteAdd("origin", dashURL)
+		if err == nil {
+			t.Fatal("RemoteAdd accepted a dash-prefixed URL; expected rejection")
+		}
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("rejection error should mention dash, got: %v", err)
+		}
+	})
+
+	t.Run("RemoteSetURL rejects dashed name and URL", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		if err := g.RemoteAdd("origin", benignURL); err != nil {
+			t.Fatalf("benign RemoteAdd failed: %v", err)
+		}
+		if err := g.RemoteSetURL(dashName, benignURL); err == nil {
+			t.Fatal("RemoteSetURL accepted a dash-prefixed name; expected rejection")
+		}
+		if err := g.RemoteSetURL("origin", dashURL); err == nil {
+			t.Fatal("RemoteSetURL accepted a dash-prefixed URL; expected rejection")
+		}
+	})
+
+	t.Run("RemoteRemove rejects dashed name", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		err := g.RemoteRemove(dashName)
+		if err == nil {
+			t.Fatal("RemoteRemove accepted a dash-prefixed name; expected rejection")
+		}
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("rejection error should mention dash, got: %v", err)
+		}
+	})
+
+	t.Run("benign name and URL still accepted", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		if err := g.RemoteAdd("origin", benignURL); err != nil {
+			t.Fatalf("RemoteAdd rejected a benign remote: %v", err)
+		}
+		if err := g.RemoteSetURL("origin", "https://example.invalid/r2.git"); err != nil {
+			t.Fatalf("RemoteSetURL rejected a benign re-point: %v", err)
+		}
+		if err := g.RemoteRemove("origin"); err != nil {
+			t.Fatalf("RemoteRemove rejected a benign remote: %v", err)
 		}
 	})
 }

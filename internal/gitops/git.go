@@ -206,11 +206,26 @@ func rejectUnsafeRemoteURL(url string) error {
 	if strings.HasPrefix(url, "ext::") {
 		return fmt.Errorf("refusing remote with ext:: URL (arbitrary command execution transport): %s", url)
 	}
+	if strings.HasPrefix(url, "-") {
+		return fmt.Errorf("refusing remote URL starting with dash (flag injection risk): %s", url)
+	}
+	return nil
+}
+
+// rejectUnsafeRemoteName blocks remote names that start with a dash to
+// prevent flag injection vulnerabilities when passed to git commands.
+func rejectUnsafeRemoteName(name string) error {
+	if strings.HasPrefix(name, "-") {
+		return fmt.Errorf("refusing remote name starting with dash (flag injection risk): %s", name)
+	}
 	return nil
 }
 
 // RemoteAdd adds a git remote.
 func (g *Git) RemoteAdd(name, url string) error {
+	if err := rejectUnsafeRemoteName(name); err != nil {
+		return err
+	}
 	if err := rejectUnsafeRemoteURL(url); err != nil {
 		return err
 	}
@@ -225,12 +240,18 @@ func (g *Git) RemoteList() (string, error) {
 
 // RemoteRemove removes a git remote.
 func (g *Git) RemoteRemove(name string) error {
+	if err := rejectUnsafeRemoteName(name); err != nil {
+		return err
+	}
 	_, err := g.run("remote", "remove", "--", name)
 	return err
 }
 
 // RemoteSetURL updates the URL of an existing git remote.
 func (g *Git) RemoteSetURL(name, url string) error {
+	if err := rejectUnsafeRemoteName(name); err != nil {
+		return err
+	}
 	if err := rejectUnsafeRemoteURL(url); err != nil {
 		return err
 	}
