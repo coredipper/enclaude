@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
@@ -158,6 +159,91 @@ func TestSealIncrementalDetectsChanges(t *testing.T) {
 	}
 	if stats.Modified != 1 {
 		t.Errorf("incremental seal: %d modified, expected 1", stats.Modified)
+	}
+}
+
+// TestSeal_ReSealsWhenObjectMissing guards the fast path's store.Exists
+// check: when the manifest still records a file as unchanged (matching size
+// and mtime) but its content blob has vanished from the object store,
+// re-sealing must rewrite the object instead of trusting the stale manifest.
+// Otherwise a lost object can never be recovered by an ordinary seal.
+func TestSeal_ReSealsWhenObjectMissing(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	// Initial seal writes the object for history.jsonl (unique content,
+	// unlike abc123.jsonl / agent-abc.jsonl which share a hash).
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("first Seal() error: %v", err)
+	}
+
+	// Delete the stored object, leaving the file (and its mtime) untouched.
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
+	hash := manifest.Files["history.jsonl"].ContentHash
+	if err := os.Remove(store.ObjectPath(hash)); err != nil {
+		t.Fatalf("removing object: %v", err)
+	}
+
+	// Re-seal: the file is byte-identical, but its object is gone.
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("second Seal() error: %v", err)
+	}
+
+	if !store.Exists(hash) {
+		t.Errorf("object for history.jsonl was not restored after re-seal: " +
+			"the fast path's store.Exists guard fell through to the slow-path " +
+			"hash check (store.go:207), which also skips writing unchanged content")
+	}
+}
+
+// TestSeal_FastPathMissesSameSizeSameMtimeContentChange pins an accepted
+// limitation of the metadata fast path: a file edited in place to new
+// content of identical byte length, with its mtime rolled back to the
+// previously sealed value, is reported Unchanged. This pathological
+// content-swap-plus-mtime-rollback case is the inherent trade-off of
+// size+mtime change detection; the test makes any future change to the
+// heuristic deliberate rather than silent.
+func TestSeal_FastPathMissesSameSizeSameMtimeContentChange(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("first Seal() error: %v", err)
+	}
+
+	manifest, _ := LoadManifest(sealDir)
+	sealedMtime := time.Unix(0, manifest.Files["history.jsonl"].ModTimeNs)
+
+	// Overwrite with different content of the SAME byte length, then roll the
+	// mtime back to the sealed value so both fast-path predicates still hold.
+	historyPath := filepath.Join(claudeDir, "history.jsonl")
+	orig, _ := os.ReadFile(historyPath)
+	next := []byte(`{"display":"XXXX","timestamp":9}`)
+	if len(next) != len(orig) {
+		t.Fatalf("test setup: replacement len %d != original len %d", len(next), len(orig))
+	}
+	if err := os.WriteFile(historyPath, next, 0644); err != nil {
+		t.Fatalf("overwriting file: %v", err)
+	}
+	if err := os.Chtimes(historyPath, sealedMtime, sealedMtime); err != nil {
+		t.Fatalf("resetting mtime: %v", err)
+	}
+
+	stats, err := Seal(cfg, identity.Recipient(), false, nil)
+	if err != nil {
+		t.Fatalf("second Seal() error: %v", err)
+	}
+
+	if stats.Modified != 0 {
+		t.Errorf("fast path unexpectedly detected the same-size, same-mtime "+
+			"content change (Modified=%d); the heuristic's behavior changed", stats.Modified)
 	}
 }
 
