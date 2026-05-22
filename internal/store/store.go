@@ -182,6 +182,16 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		}
 		seen[f.RelPath] = true
 
+		// Fast path optimization for Seal
+		if entry, ok := manifest.Files[f.RelPath]; ok && entry.ModTimeNs != 0 {
+			if entry.SizePlaintext == f.Size && entry.ModTimeNs == f.ModTimeNs {
+				if store.Exists(entry.ContentHash) {
+					stats.Unchanged++
+					continue
+				}
+			}
+		}
+
 		plaintext, err := os.ReadFile(f.AbsPath)
 		if err != nil {
 			if verbose {
@@ -194,7 +204,7 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		hash := ContentHash(plaintext)
 
 		// Check if unchanged
-		if existing, ok := manifest.Files[f.RelPath]; ok && existing.ContentHash == hash {
+		if existing, ok := manifest.Files[f.RelPath]; ok && existing.ContentHash == hash && store.Exists(hash) {
 			stats.Unchanged++
 			continue
 		}
