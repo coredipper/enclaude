@@ -13,7 +13,7 @@ builds:
       - -X github.com/coredipper/enclaude/cmd.Version={{.Version}}
 
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     name_template: "enclaude_{{ .Os }}_{{ .Arch }}"
 
 checksum:
