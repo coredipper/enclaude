@@ -204,7 +204,7 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		hash := ContentHash(plaintext)
 
 		// Check if unchanged
-		if existing, ok := manifest.Files[f.RelPath]; ok && existing.ContentHash == hash {
+		if existing, ok := manifest.Files[f.RelPath]; ok && existing.ContentHash == hash && store.Exists(hash) {
 			stats.Unchanged++
 			continue
 		}
