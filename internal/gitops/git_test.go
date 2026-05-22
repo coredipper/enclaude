@@ -124,6 +124,91 @@ func TestRemoteRejectsExtTransport(t *testing.T) {
 	})
 }
 
+// TestRemoteRejectsDashPrefixedArgs covers the dash-prefix input guards: a
+// remote name or URL beginning with "-" is refused before reaching git, so
+// it can't be mistaken for a flag even on a git build that mishandles the --
+// separator. Mirrors the ext:: coverage — every recording path is checked,
+// plus benign inputs to prove the guard doesn't over-reject.
+func TestRemoteRejectsDashPrefixedArgs(t *testing.T) {
+	const dashName = "--upload-pack=exploit"
+	const dashURL = "--upload-pack=exploit"
+	const benignURL = "https://example.invalid/r.git"
+
+	t.Run("RemoteAdd rejects dashed name", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		err := g.RemoteAdd(dashName, benignURL)
+		if err == nil {
+			t.Fatal("RemoteAdd accepted a dash-prefixed name; expected rejection")
+		}
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("rejection error should mention dash, got: %v", err)
+		}
+	})
+
+	t.Run("RemoteAdd rejects dashed URL", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		err := g.RemoteAdd("origin", dashURL)
+		if err == nil {
+			t.Fatal("RemoteAdd accepted a dash-prefixed URL; expected rejection")
+		}
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("rejection error should mention dash, got: %v", err)
+		}
+	})
+
+	t.Run("RemoteSetURL rejects dashed name and URL", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		if err := g.RemoteAdd("origin", benignURL); err != nil {
+			t.Fatalf("benign RemoteAdd failed: %v", err)
+		}
+		if err := g.RemoteSetURL(dashName, benignURL); err == nil {
+			t.Fatal("RemoteSetURL accepted a dash-prefixed name; expected rejection")
+		}
+		if err := g.RemoteSetURL("origin", dashURL); err == nil {
+			t.Fatal("RemoteSetURL accepted a dash-prefixed URL; expected rejection")
+		}
+	})
+
+	t.Run("RemoteRemove rejects dashed name", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		err := g.RemoteRemove(dashName)
+		if err == nil {
+			t.Fatal("RemoteRemove accepted a dash-prefixed name; expected rejection")
+		}
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("rejection error should mention dash, got: %v", err)
+		}
+	})
+
+	t.Run("benign name and URL still accepted", func(t *testing.T) {
+		g := New(t.TempDir())
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+		if err := g.RemoteAdd("origin", benignURL); err != nil {
+			t.Fatalf("RemoteAdd rejected a benign remote: %v", err)
+		}
+		if err := g.RemoteSetURL("origin", "https://example.invalid/r2.git"); err != nil {
+			t.Fatalf("RemoteSetURL rejected a benign re-point: %v", err)
+		}
+		if err := g.RemoteRemove("origin"); err != nil {
+			t.Fatalf("RemoteRemove rejected a benign remote: %v", err)
+		}
+	})
+}
+
 func TestConfigMergeDriverQuoting(t *testing.T) {
 	tmp := t.TempDir()
 	g := New(tmp)
