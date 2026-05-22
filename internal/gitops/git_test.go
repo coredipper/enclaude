@@ -64,17 +64,11 @@ func TestGitOptionInjectionMitigation(t *testing.T) {
 	// Test remote with dashed name
 	t.Run("RemoteAdd dashed name", func(t *testing.T) {
 		err := baseGit.RemoteAdd("--upload-pack=exploit", "http://example.com")
-		if err != nil {
-			t.Fatalf("RemoteAdd failed to create remote with dashed name: %v", err)
+		if err == nil {
+			t.Fatalf("RemoteAdd created remote with dashed name, expected rejection")
 		}
-
-		// Verify remote was created with the literal dashed name
-		out, err := baseGit.RemoteList()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(out, "--upload-pack=exploit") {
-			t.Errorf("Expected remote to be created with dashed name, got: %q", out)
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("Expected rejection due to dash, got: %v", err)
 		}
 	})
 }
