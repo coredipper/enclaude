@@ -170,11 +170,22 @@ func TestRemoteRejectsDashPrefixedArgs(t *testing.T) {
 		if err := g.RemoteAdd("origin", benignURL); err != nil {
 			t.Fatalf("benign RemoteAdd failed: %v", err)
 		}
-		if err := g.RemoteSetURL(dashName, benignURL); err == nil {
+		// Assert the guard fired (error mentions "dash") rather than git
+		// merely erroring because no remote named dashName exists — otherwise
+		// the name case would pass even with the guard removed.
+		err := g.RemoteSetURL(dashName, benignURL)
+		if err == nil {
 			t.Fatal("RemoteSetURL accepted a dash-prefixed name; expected rejection")
 		}
-		if err := g.RemoteSetURL("origin", dashURL); err == nil {
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("rejection error should mention dash, got: %v", err)
+		}
+		err = g.RemoteSetURL("origin", dashURL)
+		if err == nil {
 			t.Fatal("RemoteSetURL accepted a dash-prefixed URL; expected rejection")
+		}
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("rejection error should mention dash, got: %v", err)
 		}
 	})
 
