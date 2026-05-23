@@ -83,6 +83,18 @@ func (g *Git) Commit(msg string) error {
 	return err
 }
 
+// CommitOnly creates a commit including only the specified path.
+func (g *Git) CommitOnly(msg, path string) error {
+	_, err := g.run("commit", "--only", "-m", msg, "--", path)
+	return err
+}
+
+// HasStagedChanges returns true if there are staged changes for the given path.
+func (g *Git) HasStagedChanges(path string) bool {
+	_, err := g.run("diff", "--quiet", "--cached", "--", path)
+	return err != nil
+}
+
 // HasChanges returns true if there are staged or unstaged changes.
 func (g *Git) HasChanges() bool {
 	out, _ := g.run("status", "--porcelain")

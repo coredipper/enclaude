@@ -3,11 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/spf13/cobra"
 )
 
@@ -63,20 +63,18 @@ func runReadmeRegen(cmd *cobra.Command, args []string) error {
 }
 
 func stageAndCommitReadme(cmd *cobra.Command, sealDir string) (bool, error) {
-	gitAdd := exec.Command("git", "-C", sealDir, "add", "README.md")
-	if err := gitAdd.Run(); err != nil {
+	gitRepo := gitops.New(sealDir)
+
+	if err := gitRepo.Add("README.md"); err != nil {
 		return false, fmt.Errorf("git add: %w", err)
 	}
 
 	// Skip commit if nothing changed.
-	if err := exec.Command("git", "-C", sealDir, "diff", "--quiet", "--cached", "README.md").Run(); err == nil {
+	if !gitRepo.HasStagedChanges("README.md") {
 		return false, nil
 	}
 
-	gitCommit := exec.Command("git", "-C", sealDir, "commit", "--only", "-m", "seal: regenerate README.md", "README.md")
-	gitCommit.Stdout = cmd.OutOrStdout()
-	gitCommit.Stderr = cmd.ErrOrStderr()
-	if err := gitCommit.Run(); err != nil {
+	if err := gitRepo.CommitOnly("seal: regenerate README.md", "README.md"); err != nil {
 		return false, fmt.Errorf("git commit: %w", err)
 	}
 
