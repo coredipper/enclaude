@@ -83,6 +83,19 @@ func (g *Git) Commit(msg string) error {
 	return err
 }
 
+// HasCachedChanges checks if there are staged changes for the given paths.
+func (g *Git) HasCachedChanges(paths ...string) bool {
+	args := append([]string{"diff", "--quiet", "--cached", "--"}, paths...)
+	_, _, err := g.runSeparate(args...)
+	return err != nil
+}
+
+// CommitOnly creates a commit for only the specified files.
+func (g *Git) CommitOnly(msg string, paths ...string) (string, error) {
+	args := append([]string{"commit", "--only", "-m", msg, "--"}, paths...)
+	return g.run(args...)
+}
+
 // HasChanges returns true if there are staged or unstaged changes.
 func (g *Git) HasChanges() bool {
 	out, _ := g.run("status", "--porcelain")
