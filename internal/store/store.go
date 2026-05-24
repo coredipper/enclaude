@@ -349,6 +349,14 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		}
 		absPath := filepath.Join(cfg.Seal.ClaudeDir, relPath)
 
+		// Fast path: check size and mtime before reading the entire file and hashing
+		if info, err := os.Stat(absPath); err == nil && entry.ModTimeNs != 0 {
+			if info.Size() == entry.SizePlaintext && info.ModTime().UnixNano() == entry.ModTimeNs {
+				stats.Unchanged++
+				continue
+			}
+		}
+
 		// Check if file already exists and matches
 		if existing, err := os.ReadFile(absPath); err == nil {
 			if ContentHash(existing) == entry.ContentHash {
@@ -386,6 +394,10 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		if err := os.WriteFile(absPath, plaintext, 0600); err != nil {
 			stats.Errors++
 			continue
+		}
+		if entry.ModTimeNs != 0 {
+			mtime := time.Unix(0, entry.ModTimeNs)
+			os.Chtimes(absPath, mtime, mtime)
 		}
 
 		if verbose {
