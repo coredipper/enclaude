@@ -83,6 +83,18 @@ func (g *Git) Commit(msg string) error {
 	return err
 }
 
+// CommitFile creates a commit with the given message for a specific file.
+func (g *Git) CommitFile(msg, path string) error {
+	_, err := g.run("commit", "--only", "-m", msg, "--", path)
+	return err
+}
+
+// DiffQuietCached checks if there are staged changes for a specific file.
+func (g *Git) DiffQuietCached(path string) error {
+	_, err := g.run("diff", "--quiet", "--cached", "--", path)
+	return err
+}
+
 // HasChanges returns true if there are staged or unstaged changes.
 func (g *Git) HasChanges() bool {
 	out, _ := g.run("status", "--porcelain")
