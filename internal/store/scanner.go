@@ -34,7 +34,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 			// Count errors for paths that could contain managed files.
 			// For directories: any non-excluded dir could have included
 			// descendants. For files: check include/exclude directly.
-			if rel, relErr := filepath.Rel(claudeDir, path); relErr == nil && rel != "." {
+			if rel, relErr := fastRel(claudeDir, path); relErr == nil && rel != "." {
 				excluded := matchesAnyCompiled(rel, compiledExcludes) || matchesAnyCompiled(rel+"/", compiledExcludes)
 				if !excluded {
 					walkErrors++
@@ -43,7 +43,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 			return nil // continue scanning other files
 		}
 		if d.IsDir() {
-			rel, _ := filepath.Rel(claudeDir, path)
+			rel, _ := fastRel(claudeDir, path)
 			if rel == "." {
 				return nil
 			}
@@ -54,7 +54,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 			return nil
 		}
 
-		rel, err := filepath.Rel(claudeDir, path)
+		rel, err := fastRel(claudeDir, path)
 		if err != nil {
 			return nil
 		}
@@ -92,6 +92,21 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 		return results, fmt.Errorf("scan incomplete: %d inaccessible file(s)", walkErrors)
 	}
 	return results, nil
+}
+
+// fastRel is a highly optimized version of filepath.Rel for the common case
+// where path is a simple descendant of base. WalkDir guarantees paths are
+// joined cleanly, so we can often avoid filepath.Clean and allocation overhead.
+func fastRel(base, path string) (string, error) {
+	if base == path {
+		return ".", nil
+	}
+	if strings.HasPrefix(path, base) {
+		if len(path) > len(base) && os.IsPathSeparator(path[len(base)]) {
+			return path[len(base)+1:], nil
+		}
+	}
+	return filepath.Rel(base, path)
 }
 
 // compiledPattern holds a pre-processed glob pattern to avoid repeatedly
