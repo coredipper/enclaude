@@ -414,3 +414,17 @@ func parseShortstatFiles(s string) int {
 	}
 	return 0
 }
+
+// HasCachedChanges returns true if the specified file has staged changes.
+func (g *Git) HasCachedChanges(path string) bool {
+	// git diff --quiet returns exit status 1 if there were differences, 0 if no differences
+	err := exec.Command("git", "-C", g.dir, "diff", "--quiet", "--cached", "--", path).Run()
+	return err != nil
+}
+
+// CommitOnly creates a commit including only the specified files.
+func (g *Git) CommitOnly(msg string, paths ...string) error {
+	args := append([]string{"commit", "--only", "-m", msg, "--"}, paths...)
+	_, err := g.run(args...)
+	return err
+}

@@ -3,12 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/coredipper/enclaude/internal/store"
 	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
@@ -84,10 +84,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// 6. Initialize git repo
 	fmt.Println("\nInitializing git repository...")
-	gitInit := exec.Command("git", "init", sealDir)
-	gitInit.Stdout = os.Stdout
-	gitInit.Stderr = os.Stderr
-	if err := gitInit.Run(); err != nil {
+	git := gitops.New(sealDir)
+	if err := git.Init(); err != nil {
 		return fmt.Errorf("git init: %w", err)
 	}
 
@@ -118,16 +116,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Sealed: %s\n", stats)
 
 	// 8. Initial commit
-	gitAdd := exec.Command("git", "-C", sealDir, "add", ".")
-	if err := gitAdd.Run(); err != nil {
+	if err := git.AddAll(); err != nil {
 		return fmt.Errorf("git add: %w", err)
 	}
 
-	gitCommit := exec.Command("git", "-C", sealDir, "commit", "-m",
-		fmt.Sprintf("seal: initial seal from %s", cfg.Seal.DeviceID))
-	gitCommit.Stdout = os.Stdout
-	gitCommit.Stderr = os.Stderr
-	if err := gitCommit.Run(); err != nil {
+	if err := git.Commit(fmt.Sprintf("seal: initial seal from %s", cfg.Seal.DeviceID)); err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}
 
