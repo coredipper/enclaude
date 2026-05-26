@@ -151,6 +151,36 @@ func TestDetectActiveNonPIDFilenameNotSkipped(t *testing.T) {
 	}
 }
 
+// TestDetectActiveSignPrefixedFilenameNotSkipped guards against strconv.Atoi
+// accepting a leading +/- sign. A filename like "+2026.json" would otherwise
+// parse as PID 2026; if that stray PID is dead, the file would be skipped
+// without ever reading a live sess.PID from inside the JSON.
+func TestDetectActiveSignPrefixedFilenameNotSkipped(t *testing.T) {
+	claudeDir := t.TempDir()
+	sessDir := filepath.Join(claudeDir, "sessions")
+	if err := os.MkdirAll(sessDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	sess := ActiveSession{PID: os.Getpid(), SessionID: "live-session"}
+	data, err := json.Marshal(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, "+2026.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := DetectActive(claudeDir)
+	if err != nil {
+		t.Fatalf("DetectActive() error: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].SessionID != "live-session" {
+		t.Errorf("expected SessionID %q, got %q", "live-session", sessions[0].SessionID)
+	}
+}
+
 func TestHasActiveSessionsEmptyDir(t *testing.T) {
 	if HasActiveSessions(t.TempDir()) {
 		t.Error("expected HasActiveSessions to be false for empty claude dir")
