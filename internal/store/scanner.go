@@ -28,13 +28,29 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 	compiledIncludes := compilePatterns(includes)
 	compiledExcludes := compilePatterns(excludes)
 
+	// Optimization: Pre-compute directory prefix for fast path relativity checks.
+	claudeDirPrefix := claudeDir
+	if !strings.HasSuffix(claudeDirPrefix, string(filepath.Separator)) {
+		claudeDirPrefix += string(filepath.Separator)
+	}
+
+	fastRel := func(path string) (string, error) {
+		if path == claudeDir {
+			return ".", nil
+		}
+		if strings.HasPrefix(path, claudeDirPrefix) {
+			return path[len(claudeDirPrefix):], nil
+		}
+		return filepath.Rel(claudeDir, path)
+	}
+
 	// Optimization: Use WalkDir instead of Walk to avoid unnecessary Lstat calls for every file.
 	err := filepath.WalkDir(claudeDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			// Count errors for paths that could contain managed files.
 			// For directories: any non-excluded dir could have included
 			// descendants. For files: check include/exclude directly.
-			if rel, relErr := filepath.Rel(claudeDir, path); relErr == nil && rel != "." {
+			if rel, relErr := fastRel(path); relErr == nil && rel != "." {
 				excluded := matchesAnyCompiled(rel, compiledExcludes) || matchesAnyCompiled(rel+"/", compiledExcludes)
 				if !excluded {
 					walkErrors++
@@ -43,7 +59,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 			return nil // continue scanning other files
 		}
 		if d.IsDir() {
-			rel, _ := filepath.Rel(claudeDir, path)
+			rel, _ := fastRel(path)
 			if rel == "." {
 				return nil
 			}
@@ -54,7 +70,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 			return nil
 		}
 
-		rel, err := filepath.Rel(claudeDir, path)
+		rel, err := fastRel(path)
 		if err != nil {
 			return nil
 		}
