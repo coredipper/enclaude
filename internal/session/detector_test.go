@@ -120,6 +120,37 @@ func TestDetectActiveIgnoresDirectoriesAndNonJSON(t *testing.T) {
 	}
 }
 
+// TestDetectActiveNonPIDFilenameNotSkipped guards against a regression where
+// loose fmt.Sscanf-style filename parsing treated any leading-digit name as a
+// PID. A filename like "2026-session.json" was parsed as PID 2026; if that
+// stray PID was dead the file was skipped without ever being read, dropping
+// a session whose real sess.PID inside the JSON was alive.
+func TestDetectActiveNonPIDFilenameNotSkipped(t *testing.T) {
+	claudeDir := t.TempDir()
+	sessDir := filepath.Join(claudeDir, "sessions")
+	if err := os.MkdirAll(sessDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	sess := ActiveSession{PID: os.Getpid(), SessionID: "live-session"}
+	data, err := json.Marshal(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, "2026-session.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := DetectActive(claudeDir)
+	if err != nil {
+		t.Fatalf("DetectActive() error: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].SessionID != "live-session" {
+		t.Errorf("expected SessionID %q, got %q", "live-session", sessions[0].SessionID)
+	}
+}
+
 func TestHasActiveSessionsEmptyDir(t *testing.T) {
 	if HasActiveSessions(t.TempDir()) {
 		t.Error("expected HasActiveSessions to be false for empty claude dir")

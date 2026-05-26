@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -35,9 +37,14 @@ func DetectActive(claudeDir string) ([]ActiveSession, error) {
 
 		// Optimization: Try to extract PID from filename first (e.g., "5354.json" -> 5354).
 		// If the filename contains a valid PID and the process is dead, we skip
-		// the expensive file read and JSON parsing entirely.
+		// the expensive file read and JSON parsing entirely. The basename must
+		// match "<pid>.json" exactly; loose matching (e.g. via fmt.Sscanf) would
+		// treat a filename like "2026-session.json" as PID 2026 and could skip a
+		// file whose actual sess.PID inside the JSON is still alive.
 		var filenamePID int
-		fmt.Sscanf(entry.Name(), "%d.json", &filenamePID)
+		if pid, err := strconv.Atoi(strings.TrimSuffix(entry.Name(), ".json")); err == nil && pid > 0 {
+			filenamePID = pid
+		}
 
 		if filenamePID > 0 && !isProcessAlive(filenamePID) {
 			continue
