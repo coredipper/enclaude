@@ -33,6 +33,16 @@ func DetectActive(claudeDir string) ([]ActiveSession, error) {
 			continue
 		}
 
+		// Optimization: Try to extract PID from filename first (e.g., "5354.json" -> 5354).
+		// If the filename contains a valid PID and the process is dead, we skip
+		// the expensive file read and JSON parsing entirely.
+		var filenamePID int
+		fmt.Sscanf(entry.Name(), "%d.json", &filenamePID)
+
+		if filenamePID > 0 && !isProcessAlive(filenamePID) {
+			continue
+		}
+
 		data, err := os.ReadFile(filepath.Join(sessionsDir, entry.Name()))
 		if err != nil {
 			continue
@@ -43,13 +53,16 @@ func DetectActive(claudeDir string) ([]ActiveSession, error) {
 			continue
 		}
 
-		// Extract PID from filename (e.g., "5354.json" -> 5354)
 		if sess.PID == 0 {
-			fmt.Sscanf(entry.Name(), "%d.json", &sess.PID)
+			sess.PID = filenamePID
 		}
 
-		if sess.PID > 0 && isProcessAlive(sess.PID) {
-			active = append(active, sess)
+		if sess.PID > 0 {
+			// If the parsed PID matches the filename PID, we already know it is alive
+			// because we didn't skip it above. Otherwise, we check liveness.
+			if sess.PID == filenamePID || isProcessAlive(sess.PID) {
+				active = append(active, sess)
+			}
 		}
 	}
 
