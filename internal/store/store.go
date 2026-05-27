@@ -665,25 +665,41 @@ func ResolveMergeStrategyWithPattern(relPath string, strategies map[string]strin
 // Per-segment scoring: literal=3, constrained glob (contains [)=2, *=1, **=0.
 // Ties broken by segment count (more = more specific) then pattern string.
 func patternSpecificity(pattern string) string {
-	segs := strings.Split(pattern, "/")
-	// Sum per-segment scores: literal=3, glob=2, *=1, **=0.
-	// Higher total = more specific.
+	// Optimization: avoid strings.Split slice allocation by parsing segments manually
 	total := 0
-	for _, seg := range segs {
-		switch {
-		case seg == "**":
-			total += 0
-		case seg == "*":
-			total += 1
-		case strings.ContainsAny(seg, "*?["):
-			total += 2
-		default:
-			total += 3
+	segments := 1
+	start := 0
+
+	for i := 0; i <= len(pattern); i++ {
+		if i == len(pattern) || pattern[i] == '/' {
+			if i-start == 2 && pattern[start] == '*' && pattern[start+1] == '*' {
+				total += 0
+			} else if i-start == 1 && pattern[start] == '*' {
+				total += 1
+			} else {
+				hasGlob := false
+				for j := start; j < i; j++ {
+					if pattern[j] == '*' || pattern[j] == '?' || pattern[j] == '[' {
+						hasGlob = true
+						break
+					}
+				}
+				if hasGlob {
+					total += 2
+				} else {
+					total += 3
+				}
+			}
+			start = i + 1
+			if i != len(pattern) {
+				segments++
+			}
 		}
 	}
+
 	// Fixed-width: total score (2 digits), segment count (2 digits), pattern.
 	// Higher total wins; ties broken by more segments, then lexical.
-	return fmt.Sprintf("%02d:%02d:%s", total, len(segs), pattern)
+	return fmt.Sprintf("%02d:%02d:%s", total, segments, pattern)
 }
 
 // isSessionCompleteFor determines whether a session JSONL file looks
