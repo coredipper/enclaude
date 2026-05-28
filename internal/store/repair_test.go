@@ -273,3 +273,112 @@ func TestRotateReEncrypts(t *testing.T) {
 		}
 	}
 }
+
+func TestRepairCorruptObject(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
+	corruptedPath := "history.jsonl"
+	hash := manifest.Files[corruptedPath].ContentHash
+
+	// Corrupt the object
+	os.WriteFile(store.ObjectPath(hash), []byte("corrupt data"), 0644)
+
+	// Repair should fix it
+	result, err := Repair(cfg, identity, false, false)
+	if err != nil {
+		t.Fatalf("Repair() error: %v", err)
+	}
+
+	if result.Fixed != 1 {
+		t.Errorf("expected 1 fixed, got %d", result.Fixed)
+	}
+
+	// Verify the object is uncorrupted now
+	manifest2, _ := LoadManifest(sealDir)
+	hash2 := manifest2.Files[corruptedPath].ContentHash
+	encrypted, err := store.Read(hash2)
+	if err != nil {
+		t.Fatalf("failed to read repaired object: %v", err)
+	}
+	plaintext, err := crypto.Decrypt(encrypted, identity)
+	if err != nil {
+		t.Fatalf("failed to decrypt repaired object: %v", err)
+	}
+
+	// Original history.jsonl contents
+	origContents, _ := os.ReadFile(filepath.Join(claudeDir, corruptedPath))
+	if ContentHash(plaintext) != ContentHash(origContents) {
+		t.Errorf("repaired object contents mismatch")
+	}
+}
+
+func TestRepairDeletesOrphans(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	// Add a fake orphan object
+	store := NewObjectStore(sealDir)
+	fakeHash := "deadbeef12345678deadbeef12345678deadbeef12345678deadbeef12345678"
+	store.Write(fakeHash, []byte("orphan data"))
+
+	// Run repair with deleteOrphans=true
+	result, err := Repair(cfg, identity, true, false)
+	if err != nil {
+		t.Fatalf("Repair() error: %v", err)
+	}
+
+	if len(result.OrphanObjects) != 1 {
+		t.Errorf("expected 1 orphan detected, got %d", len(result.OrphanObjects))
+	}
+
+	// Verify the object is deleted
+	if store.Exists(fakeHash) {
+		t.Error("orphan object was not deleted")
+	}
+}
+
+func TestRepairPlaintextMissing(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
+	deletedPath := "history.jsonl"
+	hash := manifest.Files[deletedPath].ContentHash
+
+	// Delete both object and plaintext
+	os.Remove(store.ObjectPath(hash))
+	os.Remove(filepath.Join(claudeDir, deletedPath))
+
+	// Run repair
+	result, err := Repair(cfg, identity, false, false)
+	if err != nil {
+		t.Fatalf("Repair() error: %v", err)
+	}
+
+	// Should not be able to fix it since plaintext is missing
+	if result.Fixed != 0 {
+		t.Errorf("expected 0 fixed, got %d", result.Fixed)
+	}
+	if len(result.MissingObjects) != 1 {
+		t.Errorf("expected 1 missing, got %d", len(result.MissingObjects))
+	}
+}
