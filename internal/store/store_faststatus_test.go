@@ -333,3 +333,93 @@ func TestUnsealStatus_LegacyManifestWithoutModTimeNs_FallsThrough(t *testing.T) 
 		t.Fatalf("expected clean diff via slow-path fallback, got %+v", diff)
 	}
 }
+
+// TestStatus_LoadManifestError verifies that an invalid manifest JSON causes Status to return an error.
+func TestStatus_LoadManifestError(t *testing.T) {
+	claudeDir := t.TempDir()
+	sealDir := t.TempDir()
+
+	// Write an invalid manifest to trigger a LoadManifest error
+	if err := os.WriteFile(filepath.Join(sealDir, "manifest.json"), []byte("{invalid json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Seal: config.SealSection{ClaudeDir: claudeDir, SealDir: sealDir, DeviceID: "test"},
+	}
+
+	_, err := Status(cfg)
+	if err == nil {
+		t.Fatal("expected an error when LoadManifest fails, got nil")
+	}
+}
+
+// TestStatus_ScanFilesError verifies that file scanning errors (e.g., inaccessible directory) are returned by Status.
+func TestStatus_ScanFilesError(t *testing.T) {
+	claudeDir := t.TempDir()
+	sealDir := t.TempDir()
+
+	subDir := filepath.Join(claudeDir, "sub")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("test"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Make subdirectory inaccessible to trigger an error during WalkDir
+	if err := os.Chmod(subDir, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.Chmod(subDir, 0755) // Ensure cleanup works
+	})
+
+	cfg := &config.Config{
+		Seal:    config.SealSection{ClaudeDir: claudeDir, SealDir: sealDir, DeviceID: "test"},
+		Include: config.PatternSection{Patterns: []string{"sub/file.txt"}},
+	}
+
+	_, err := Status(cfg)
+	if err == nil {
+		t.Fatal("expected an error when ScanFiles fails, got nil")
+	}
+}
+
+// TestStatus_ReadFileError verifies that if a file cannot be read, it is handled gracefully (omitted from current manifest).
+func TestStatus_ReadFileError(t *testing.T) {
+	claudeDir := t.TempDir()
+	sealDir := t.TempDir()
+
+	filePath := filepath.Join(claudeDir, "data.txt")
+	// Make file completely unreadable but accessible by WalkDir
+	if err := os.WriteFile(filePath, []byte("test"), 0000); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Seal:    config.SealSection{ClaudeDir: claudeDir, SealDir: sealDir, DeviceID: "test"},
+		Include: config.PatternSection{Patterns: []string{"*"}},
+	}
+
+	// Create a dummy manifest where data.txt is present to ensure diff doesn't panic
+	manifest := NewManifest("test")
+	manifest.Files["data.txt"] = FileEntry{
+		ContentHash:   ContentHash([]byte("old_test")),
+		SizePlaintext: 8,
+		ModTimeNs:     1,
+	}
+	if err := manifest.Save(sealDir); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := Status(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error when a file fails to read: %v", err)
+	}
+
+	// Since data.txt couldn't be read, it won't be in the 'current' manifest,
+	// so diff will mark it as deleted relative to the initial manifest.
+	if len(diff.Deleted) != 1 {
+		t.Fatalf("expected 1 deleted file (could not be read), got %d", len(diff.Deleted))
+	}
+}
