@@ -69,3 +69,52 @@ func TestPatternSpecificityDeeperBeatsShallower(t *testing.T) {
 		t.Errorf("deeper pattern %q should beat shallower %q", deeper, shallower)
 	}
 }
+
+func TestResolveMergeStrategy(t *testing.T) {
+	strategies := map[string]string{
+		"history.jsonl": "jsonl_dedup",
+		"**/*.jsonl":    "last_write_wins",
+		"projects/*/sessions-index.json": "sessions_index",
+	}
+
+	tests := []struct {
+		name     string
+		relPath  string
+		expected string
+	}{
+		{
+			name:     "exact match wins",
+			relPath:  "history.jsonl",
+			expected: "jsonl_dedup",
+		},
+		{
+			name:     "glob match wins",
+			relPath:  "projects/abc/sessions-index.json",
+			expected: "sessions_index",
+		},
+		{
+			name:     "wildcard glob fallback",
+			relPath:  "other.jsonl",
+			expected: "last_write_wins",
+		},
+		{
+			name:     "default md",
+			relPath:  "CLAUDE.md",
+			expected: "text_merge",
+		},
+		{
+			name:     "default unknown",
+			relPath:  "some-random-file.txt",
+			expected: "last_write_wins",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			strategy := ResolveMergeStrategy(tt.relPath, strategies)
+			if strategy != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, strategy)
+			}
+		})
+	}
+}
