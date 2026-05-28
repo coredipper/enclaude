@@ -77,6 +77,22 @@ func TestEncryptDecryptWithPassphrase(t *testing.T) {
 	}
 }
 
+func TestEncryptWithEmptyPassphrase(t *testing.T) {
+	plaintext := []byte("secret data")
+	_, err := EncryptWithPassphrase(plaintext, "")
+	if err == nil {
+		t.Fatal("expected error encrypting with empty passphrase")
+	}
+}
+
+func TestDecryptWithEmptyPassphrase(t *testing.T) {
+	// Encrypted data doesn't matter since it should fail on scrypt identity creation
+	_, err := DecryptWithPassphrase([]byte("invalid ciphertext"), "")
+	if err == nil {
+		t.Fatal("expected error decrypting with empty passphrase")
+	}
+}
+
 func TestDecryptWithWrongPassphrase(t *testing.T) {
 	plaintext := []byte("secret data")
 	encrypted, err := EncryptWithPassphrase(plaintext, "correct-passphrase")
