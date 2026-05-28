@@ -133,9 +133,6 @@ func compilePatterns(patterns []string) []compiledPattern {
 
 // matchesAnyCompiled checks if a relative path matches any of the compiled glob patterns.
 func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
-	var pathSegs []string
-	var segsComputed bool
-
 	for _, p := range patterns {
 		if !p.hasDoubleStar {
 			matched, _ := filepath.Match(p.raw, relPath)
@@ -143,11 +140,7 @@ func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
 				return true
 			}
 		} else {
-			if !segsComputed {
-				pathSegs = strings.Split(relPath, "/")
-				segsComputed = true
-			}
-			if matchSegments(pathSegs, p.segs) {
+			if matchSegments(relPath, p.segs) {
 				return true
 			}
 		}
@@ -156,21 +149,21 @@ func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
 }
 
 // MatchGlob matches a path against a glob pattern with ** support.
-// It splits both path and pattern into segments and matches segment-by-segment.
+// It splits the pattern into segments and matches segment-by-segment against the path string.
 func MatchGlob(path, pattern string) bool {
 	if !strings.Contains(pattern, "**") {
 		matched, _ := filepath.Match(pattern, path)
 		return matched
 	}
 
-	pathSegs := strings.Split(path, "/")
 	patSegs := strings.Split(pattern, "/")
-	return matchSegments(pathSegs, patSegs)
+	return matchSegments(path, patSegs)
 }
 
-// matchSegments recursively matches path segments against pattern segments.
+// matchSegments recursively matches a path string against pattern segments.
 // Handles ** as "zero or more directory levels".
-func matchSegments(pathSegs, patSegs []string) bool {
+// Optimization: We avoid strings.Split on the path to eliminate slice allocations.
+func matchSegments(path string, patSegs []string) bool {
 	for len(patSegs) > 0 {
 		pat := patSegs[0]
 
@@ -184,29 +177,49 @@ func matchSegments(pathSegs, patSegs []string) bool {
 			}
 
 			// Try matching the rest of the pattern at every position
-			for i := 0; i <= len(pathSegs); i++ {
-				if matchSegments(pathSegs[i:], patSegs) {
+			remainingPath := path
+			for {
+				if matchSegments(remainingPath, patSegs) {
 					return true
+				}
+				if remainingPath == "" {
+					break
+				}
+				idx := strings.IndexByte(remainingPath, '/')
+				if idx == -1 {
+					remainingPath = ""
+				} else {
+					remainingPath = remainingPath[idx+1:]
 				}
 			}
 			return false
 		}
 
 		// No more path segments but pattern still has non-** segments
-		if len(pathSegs) == 0 {
+		if path == "" {
 			return false
 		}
 
+		// Get current segment
+		var currentSegment string
+		idx := strings.IndexByte(path, '/')
+		if idx == -1 {
+			currentSegment = path
+			path = "" // Exhausted path
+		} else {
+			currentSegment = path[:idx]
+			path = path[idx+1:] // Move past '/'
+		}
+
 		// Match current segment with filepath.Match (handles * and ? within a segment)
-		matched, _ := filepath.Match(pat, pathSegs[0])
+		matched, _ := filepath.Match(pat, currentSegment)
 		if !matched {
 			return false
 		}
 
-		pathSegs = pathSegs[1:]
 		patSegs = patSegs[1:]
 	}
 
 	// Pattern exhausted — path must also be exhausted
-	return len(pathSegs) == 0
+	return path == ""
 }
