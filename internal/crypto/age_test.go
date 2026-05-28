@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"bytes"
+	"encoding/base64"
 	"testing"
 )
 
@@ -87,6 +88,43 @@ func TestDecryptWithWrongPassphrase(t *testing.T) {
 	_, err = DecryptWithPassphrase(encrypted, "wrong-passphrase")
 	if err == nil {
 		t.Fatal("expected error decrypting with wrong passphrase")
+	}
+}
+
+func TestDecryptWithPassphrase_KnownCiphertext(t *testing.T) {
+	// The plaintext is "known plaintext for testing"
+	// Encrypted with passphrase "stable-passphrase-42"
+	ciphertextBase64 := "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNjcnlwdCBJNk5CL1FKU2YyRCtXTlNRMElLcUxnIDE4Ck9XTDEyOU0yd1NCZ1RHN2QyNG1ra0wvRnBua1JyRVNFYzVNNkRzVUJGd0kKLS0tIG9BZkdFUGVvVXhpTWxhekcxMFpkZGw2UUVyOUwwcUhCK3dqa1dpb3hSY0kK/BW+L04EYlnmc24tdHf9EhZrCzIJXV6j3xACxEcxTNW5jTp3n8PeBmWVDjO3cR8dUIaab+QvkK3w4Hc="
+
+	ciphertext, err := base64.StdEncoding.DecodeString(ciphertextBase64)
+	if err != nil {
+		t.Fatalf("Failed to decode base64 ciphertext: %v", err)
+	}
+
+	passphrase := "stable-passphrase-42"
+	expectedPlaintext := "known plaintext for testing"
+
+	decrypted, err := DecryptWithPassphrase(ciphertext, passphrase)
+	if err != nil {
+		t.Fatalf("DecryptWithPassphrase() error: %v", err)
+	}
+
+	if string(decrypted) != expectedPlaintext {
+		t.Errorf("got %q, want %q", decrypted, expectedPlaintext)
+	}
+}
+
+func TestDecryptWithPassphrase_EmptyPassphrase(t *testing.T) {
+	_, err := DecryptWithPassphrase([]byte("some ciphertext"), "")
+	if err == nil {
+		t.Fatal("expected error decrypting with empty passphrase, got nil")
+	}
+}
+
+func TestEncryptWithPassphrase_EmptyPassphrase(t *testing.T) {
+	_, err := EncryptWithPassphrase([]byte("some plaintext"), "")
+	if err == nil {
+		t.Fatal("expected error encrypting with empty passphrase, got nil")
 	}
 }
 
