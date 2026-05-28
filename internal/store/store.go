@@ -182,97 +182,23 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		}
 		seen[f.RelPath] = true
 
-		// Fast path optimization for Seal
-		if entry, ok := manifest.Files[f.RelPath]; ok && entry.ModTimeNs != 0 {
-			if entry.SizePlaintext == f.Size && entry.ModTimeNs == f.ModTimeNs {
-				if store.Exists(entry.ContentHash) {
-					stats.Unchanged++
-					continue
-				}
-			}
-		}
-
-		plaintext, err := os.ReadFile(f.AbsPath)
-		if err != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: cannot read %s: %v\n", f.RelPath, err)
-			}
-			stats.Errors++
-			continue
-		}
-
-		hash := ContentHash(plaintext)
-
-		// Check if unchanged
-		if existing, ok := manifest.Files[f.RelPath]; ok && existing.ContentHash == hash && store.Exists(hash) {
-			stats.Unchanged++
-			continue
-		}
-
-		// Encrypt and store
-		encrypted, err := crypto.Encrypt(plaintext, recipient)
-		if err != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: cannot encrypt %s: %v\n", f.RelPath, err)
-			}
-			stats.Errors++
-			continue
-		}
-
-		if err := store.Write(hash, encrypted); err != nil {
-			stats.Errors++
-			continue
-		}
-
-		// Determine if this is new or modified
-		if _, existed := manifest.Files[f.RelPath]; existed {
-			stats.Modified++
-		} else {
-			stats.Added++
-		}
-		stats.BytesPlaintext += f.Size
-		stats.BytesEncrypted += int64(len(encrypted))
-
-		if verbose {
-			action := "new"
-			if _, existed := manifest.Files[f.RelPath]; existed {
-				action = "mod"
-			}
-			fmt.Printf("  [%s] %s (%s)\n", action, f.RelPath, FormatSize(f.Size))
-		}
-
-		// Count JSONL lines if applicable
-		lineCount := 0
-		if strings.HasSuffix(f.RelPath, ".jsonl") {
-			lineCount = bytes.Count(plaintext, []byte("\n"))
-			if len(plaintext) > 0 && plaintext[len(plaintext)-1] != '\n' {
-				lineCount++ // last line without trailing newline
-			}
-		}
-
-		manifest.Files[f.RelPath] = FileEntry{
-			ContentHash:     hash,
-			SizePlaintext:   f.Size,
-			SizeEncrypted:   int64(len(encrypted)),
-			Mtime:           time.Unix(0, f.ModTimeNs).UTC().Format(time.RFC3339),
-			ModTimeNs:       f.ModTimeNs,
-			MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
-			JSONLLineCount:  lineCount,
-			SessionComplete: isSessionCompleteFor(f.RelPath, activeSessions),
-		}
+		processFile(f, manifest, store, cfg, recipient, activeSessions, verbose, &stats)
 	}
 
-	// Mark deleted files
-	for path := range manifest.Files {
-		if !seen[path] {
-			if verbose {
-				fmt.Printf("  [del] %s\n", path)
-			}
-			delete(manifest.Files, path)
-			stats.Deleted++
-		}
+	trackDeleted(manifest, seen, verbose, &stats)
+
+	tallySessions(manifest, prior, &stats)
+
+	// Save manifest
+	if err := manifest.Save(sealDir); err != nil {
+		return stats, fmt.Errorf("saving manifest: %w", err)
 	}
 
+	stats.Elapsed = time.Since(start)
+	return stats, nil
+}
+
+func tallySessions(manifest *Manifest, prior map[string]FileEntry, stats *SealStats) {
 	// Tally session activity against the prior manifest. "Updated" counts
 	// session JSONLs whose JSONLLineCount grew since the previous seal —
 	// the most reliable signal short of consulting live process state.
@@ -290,14 +216,99 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 			stats.Sessions.Updated++
 		}
 	}
+}
 
-	// Save manifest
-	if err := manifest.Save(sealDir); err != nil {
-		return stats, fmt.Errorf("saving manifest: %w", err)
+func trackDeleted(manifest *Manifest, seen map[string]bool, verbose bool, stats *SealStats) {
+	for path := range manifest.Files {
+		if !seen[path] {
+			if verbose {
+				fmt.Printf("  [del] %s\n", path)
+			}
+			delete(manifest.Files, path)
+			stats.Deleted++
+		}
+	}
+}
+
+func processFile(f ScanResult, manifest *Manifest, store *ObjectStore, cfg *config.Config, recipient age.Recipient, activeSessions map[string]bool, verbose bool, stats *SealStats) {
+	// Fast path optimization for Seal
+	if entry, ok := manifest.Files[f.RelPath]; ok && entry.ModTimeNs != 0 {
+		if entry.SizePlaintext == f.Size && entry.ModTimeNs == f.ModTimeNs {
+			if store.Exists(entry.ContentHash) {
+				stats.Unchanged++
+				return
+			}
+		}
 	}
 
-	stats.Elapsed = time.Since(start)
-	return stats, nil
+	plaintext, err := os.ReadFile(f.AbsPath)
+	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "  warning: cannot read %s: %v\n", f.RelPath, err)
+		}
+		stats.Errors++
+		return
+	}
+
+	hash := ContentHash(plaintext)
+
+	// Check if unchanged
+	if existing, ok := manifest.Files[f.RelPath]; ok && existing.ContentHash == hash && store.Exists(hash) {
+		stats.Unchanged++
+		return
+	}
+
+	// Encrypt and store
+	encrypted, err := crypto.Encrypt(plaintext, recipient)
+	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "  warning: cannot encrypt %s: %v\n", f.RelPath, err)
+		}
+		stats.Errors++
+		return
+	}
+
+	if err := store.Write(hash, encrypted); err != nil {
+		stats.Errors++
+		return
+	}
+
+	// Determine if this is new or modified
+	if _, existed := manifest.Files[f.RelPath]; existed {
+		stats.Modified++
+	} else {
+		stats.Added++
+	}
+	stats.BytesPlaintext += f.Size
+	stats.BytesEncrypted += int64(len(encrypted))
+
+	if verbose {
+		action := "new"
+		if _, existed := manifest.Files[f.RelPath]; existed {
+			action = "mod"
+		}
+		fmt.Printf("  [%s] %s (%s)\n", action, f.RelPath, FormatSize(f.Size))
+	}
+
+	// Count JSONL lines if applicable
+	lineCount := 0
+	if strings.HasSuffix(f.RelPath, ".jsonl") {
+		lineCount = bytes.Count(plaintext, []byte("\n"))
+		if len(plaintext) > 0 && plaintext[len(plaintext)-1] != '\n' {
+			lineCount++ // last line without trailing newline
+		}
+	}
+
+	manifest.Files[f.RelPath] = FileEntry{
+		ContentHash:     hash,
+		SizePlaintext:   f.Size,
+		SizeEncrypted:   int64(len(encrypted)),
+		Mtime:           time.Unix(0, f.ModTimeNs).UTC().Format(time.RFC3339),
+		ModTimeNs:       f.ModTimeNs,
+		MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
+		JSONLLineCount:  lineCount,
+		SessionComplete: isSessionCompleteFor(f.RelPath, activeSessions),
+	}
 }
 
 // activeSessionIDs returns the set of session UUIDs currently associated
