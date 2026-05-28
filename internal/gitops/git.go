@@ -8,8 +8,26 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+var (
+	gitPath     string
+	gitPathOnce sync.Once
+)
+
+func getGitPath() string {
+	gitPathOnce.Do(func() {
+		path, err := exec.LookPath("git")
+		if err == nil {
+			gitPath = path
+		} else {
+			gitPath = "git"
+		}
+	})
+	return gitPath
+}
 
 // Git wraps git CLI operations for a repository.
 type Git struct {
@@ -41,7 +59,7 @@ func New(repoDir string) *Git {
 // run executes a git command and returns combined output. Use this for
 // user-facing diagnostics where interleaved stdout/stderr is acceptable.
 func (g *Git) run(args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", g.dir}, args...)...)
+	cmd := exec.Command(getGitPath(), append([]string{"-C", g.dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
@@ -51,7 +69,7 @@ func (g *Git) run(args ...string) (string, error) {
 // Use this for any path that parses git's output.
 func (g *Git) runSeparate(args ...string) (stdout, stderr string, err error) {
 	full := append([]string{"-C", g.dir, "-c", "color.ui=never"}, args...)
-	cmd := exec.Command("git", full...)
+	cmd := exec.Command(getGitPath(), full...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -174,7 +192,7 @@ func (g *Git) Pull(remote, branch string) (PullStats, string, error) {
 	// interleaved with stdout — both ends up in the same string for the
 	// parser. Color is suppressed via -c flags. The -- separator keeps a
 	// dash-prefixed remote/branch from being parsed as a git option.
-	cmd := exec.Command("git", append([]string{"-C", g.dir, "-c", "color.ui=never", "pull", "--"}, remote, branch)...)
+	cmd := exec.Command(getGitPath(), append([]string{"-C", g.dir, "-c", "color.ui=never", "pull", "--"}, remote, branch)...)
 	rawOut, err := cmd.CombinedOutput()
 	out := strings.TrimSpace(string(rawOut))
 
