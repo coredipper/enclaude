@@ -337,7 +337,7 @@ func TestMergeSessionsIndexDeduplicatesOnSessionId(t *testing.T) {
 	}
 }
 
-// TestSplitLines verifies that splitLines wraps strings.Split appropriately
+// TestSplitLines verifies that splitLines wraps bytes.Split appropriately
 // and produces the expected raw slices including trailing empty strings
 // for inputs with trailing newlines.
 func TestSplitLines(t *testing.T) {
@@ -357,13 +357,13 @@ func TestSplitLines(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := splitLines(tt.input)
+			got := splitLines([]byte(tt.input))
 			if len(got) != len(tt.expected) {
 				t.Fatalf("expected %d lines, got %d. Expected: %#v, Got: %#v", len(tt.expected), len(got), tt.expected, got)
 			}
 			for i := range got {
-				if got[i] != tt.expected[i] {
-					t.Errorf("line %d: expected %q, got %q", i, tt.expected[i], got[i])
+				if string(got[i]) != tt.expected[i] {
+					t.Errorf("line %d: expected %q, got %q", i, tt.expected[i], string(got[i]))
 				}
 			}
 		})

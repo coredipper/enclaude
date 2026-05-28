@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,10 +19,10 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 	var entries []jsonlEntry
 
 	for _, data := range [][]byte{ours, theirs} {
-		lines := splitLines(string(data))
+		lines := splitLines(data)
 		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
+			line = bytes.TrimSpace(line)
+			if len(line) == 0 {
 				continue
 			}
 
@@ -29,10 +30,11 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 			if _, exists := seen[hash]; exists {
 				continue
 			}
-			seen[hash] = line
+			lineStr := string(line)
+			seen[hash] = lineStr
 
 			entries = append(entries, jsonlEntry{
-				line:      line,
+				line:      lineStr,
 				timestamp: extractTimestamp(line),
 			})
 		}
@@ -121,22 +123,22 @@ type jsonlEntry struct {
 	timestamp float64
 }
 
-func splitLines(s string) []string {
-	return strings.Split(s, "\n")
+func splitLines(s []byte) [][]byte {
+	return bytes.Split(s, []byte("\n"))
 }
 
 // hashNormalized computes SHA-256 of JSON with sorted keys to catch semantic duplicates.
-func hashNormalized(line string) string {
+func hashNormalized(line []byte) string {
 	var obj map[string]interface{}
-	if err := json.Unmarshal([]byte(line), &obj); err != nil {
+	if err := json.Unmarshal(line, &obj); err != nil {
 		// Not valid JSON — hash the raw line
-		h := sha256.Sum256([]byte(line))
+		h := sha256.Sum256(line)
 		return hex.EncodeToString(h[:])
 	}
 
 	normalized, err := json.Marshal(obj)
 	if err != nil {
-		h := sha256.Sum256([]byte(line))
+		h := sha256.Sum256(line)
 		return hex.EncodeToString(h[:])
 	}
 
@@ -145,9 +147,9 @@ func hashNormalized(line string) string {
 }
 
 // extractTimestamp pulls the "timestamp" field from a JSON line for sorting.
-func extractTimestamp(line string) float64 {
+func extractTimestamp(line []byte) float64 {
 	var obj map[string]interface{}
-	if err := json.Unmarshal([]byte(line), &obj); err != nil {
+	if err := json.Unmarshal(line, &obj); err != nil {
 		return 0
 	}
 
