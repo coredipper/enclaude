@@ -83,7 +83,7 @@ func TestVerifyDetectsMissingObject(t *testing.T) {
 	entry := manifest.Files["history.jsonl"]
 	os.Remove(store.ObjectPath(entry.ContentHash))
 
-	result, err := Verify(cfg, identity, false)
+	result, err := Verify(cfg, identity, true)
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestVerifyDetectsOrphan(t *testing.T) {
 	fakeHash := "deadbeef12345678deadbeef12345678deadbeef12345678deadbeef12345678"
 	store.Write(fakeHash, []byte("orphan data"))
 
-	result, err := Verify(cfg, identity, false)
+	result, err := Verify(cfg, identity, true)
 	if err != nil {
 		t.Fatalf("Verify() error: %v", err)
 	}
@@ -271,5 +271,186 @@ func TestRotateReEncrypts(t *testing.T) {
 		if ContentHash(origData) != entry.ContentHash || ContentHash(restoredData) != entry.ContentHash {
 			t.Errorf("content mismatch for %s after rotation", path)
 		}
+	}
+}
+
+func TestVerifyNoManifest(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	// LoadManifest returns nil, nil when file doesn't exist
+	// Verify should return an error "no manifest found"
+	_, err := Verify(cfg, identity, false)
+	if err == nil {
+		t.Fatal("expected Verify() to fail when no manifest exists, got nil")
+	}
+	if err.Error() != "no manifest found" {
+		t.Fatalf("expected error 'no manifest found', got: %v", err)
+	}
+}
+
+func TestVerifyInvalidManifest(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	// Write an invalid manifest.json
+	os.WriteFile(filepath.Join(sealDir, "manifest.json"), []byte("invalid json"), 0644)
+
+	_, err := Verify(cfg, identity, false)
+	if err == nil {
+		t.Fatal("expected Verify() to fail with invalid manifest, got nil")
+	}
+}
+
+func TestVerifyReadError(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
+
+	// Get an entry
+	var deletedPath string
+	var hash string
+	for p, entry := range manifest.Files {
+		deletedPath = p
+		hash = entry.ContentHash
+		break
+	}
+
+	// Replace object with a directory to cause read error
+	objPath := store.ObjectPath(hash)
+	os.Remove(objPath)
+	os.MkdirAll(objPath, 0755)
+
+	result, err := Verify(cfg, identity, true)
+	if err != nil {
+		t.Fatalf("Verify() error: %v", err)
+	}
+
+	found := false
+	for _, p := range result.CorruptObjects {
+		if p == deletedPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected %s to be corrupt due to read error", deletedPath)
+	}
+}
+
+func TestVerifyDecryptError(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
+
+	var corruptedPath string
+	var hash string
+	for p, entry := range manifest.Files {
+		corruptedPath = p
+		hash = entry.ContentHash
+		break
+	}
+
+	// Write random data to object to cause decrypt error
+	objPath := store.ObjectPath(hash)
+	os.WriteFile(objPath, []byte("definitely not an age encrypted file"), 0644)
+
+	result, err := Verify(cfg, identity, true)
+	if err != nil {
+		t.Fatalf("Verify() error: %v", err)
+	}
+
+	found := false
+	for _, p := range result.CorruptObjects {
+		if p == corruptedPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected %s to be corrupt due to decrypt error", corruptedPath)
+	}
+}
+
+func TestVerifyHashMismatch(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
+
+	var corruptedPath string
+	var hash string
+	for p, entry := range manifest.Files {
+		corruptedPath = p
+		hash = entry.ContentHash
+		break // just pick the first one
+	}
+
+	// Create another encrypted object with wrong content
+	wrongContent := []byte("wrong plaintext")
+	wrongEncrypted, _ := crypto.Encrypt(wrongContent, identity.Recipient())
+	objPath := store.ObjectPath(hash)
+	os.WriteFile(objPath, wrongEncrypted, 0644)
+
+	result, err := Verify(cfg, identity, true)
+	if err != nil {
+		t.Fatalf("Verify() error: %v", err)
+	}
+
+	found := false
+	for _, p := range result.CorruptObjects {
+		if p == corruptedPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected %s to be corrupt due to hash mismatch", corruptedPath)
+	}
+}
+
+func TestVerifyListObjectsError(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	// Replace objects directory with a file to cause ListAll() to fail
+	objectsDir := filepath.Join(sealDir, "objects")
+	os.RemoveAll(objectsDir)
+	os.WriteFile(objectsDir, []byte("not a directory"), 0644)
+
+	_, err := Verify(cfg, identity, true)
+	if err == nil {
+		t.Fatal("expected Verify() to fail due to ListAll error, got nil")
 	}
 }
