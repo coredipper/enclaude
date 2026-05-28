@@ -347,64 +347,22 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		if progress != nil {
 			progress(i, stats.Total, relPath)
 		}
-		absPath := filepath.Join(cfg.Seal.ClaudeDir, relPath)
 
-		// Fast path: check size and mtime before reading the entire file and hashing
-		if info, err := os.Stat(absPath); err == nil && entry.ModTimeNs != 0 {
-			if info.Size() == entry.SizePlaintext && info.ModTime().UnixNano() == entry.ModTimeNs {
-				stats.Unchanged++
-				continue
-			}
-		}
-
-		// Check if file already exists and matches
-		if existing, err := os.ReadFile(absPath); err == nil {
-			if ContentHash(existing) == entry.ContentHash {
-				stats.Unchanged++
-				continue
-			}
-		}
-
-		// Read encrypted object
-		encrypted, err := store.Read(entry.ContentHash)
+		unchanged, bytesDecrypted, err := unsealFile(cfg.Seal.ClaudeDir, relPath, entry, store, identity, verbose)
 		if err != nil {
 			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: missing object for %s: %v\n", relPath, err)
+				fmt.Fprintf(os.Stderr, "  %v\n", err)
 			}
 			stats.Errors++
 			continue
 		}
 
-		// Decrypt
-		plaintext, err := crypto.Decrypt(encrypted, identity)
-		if err != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: cannot decrypt %s: %v\n", relPath, err)
-			}
-			stats.Errors++
-			continue
+		if unchanged {
+			stats.Unchanged++
+		} else {
+			stats.Restored++
+			stats.BytesDecrypted += bytesDecrypted
 		}
-
-		// Write to claude directory
-		dir := filepath.Dir(absPath)
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			stats.Errors++
-			continue
-		}
-		if err := os.WriteFile(absPath, plaintext, 0600); err != nil {
-			stats.Errors++
-			continue
-		}
-		if entry.ModTimeNs != 0 {
-			mtime := time.Unix(0, entry.ModTimeNs)
-			os.Chtimes(absPath, mtime, mtime)
-		}
-
-		if verbose {
-			fmt.Printf("  [restore] %s (%s)\n", relPath, FormatSize(entry.SizePlaintext))
-		}
-		stats.Restored++
-		stats.BytesDecrypted += int64(len(plaintext))
 	}
 
 	// Delete managed files not in the manifest. The manifest is the source
@@ -967,4 +925,53 @@ func FormatSize(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+func unsealFile(claudeDir string, relPath string, entry FileEntry, store *ObjectStore, identity age.Identity, verbose bool) (unchanged bool, bytesDecrypted int64, err error) {
+	absPath := filepath.Join(claudeDir, relPath)
+
+	// Fast path: check size and mtime before reading the entire file and hashing
+	if info, err := os.Stat(absPath); err == nil && entry.ModTimeNs != 0 {
+		if info.Size() == entry.SizePlaintext && info.ModTime().UnixNano() == entry.ModTimeNs {
+			return true, 0, nil
+		}
+	}
+
+	// Check if file already exists and matches
+	if existing, err := os.ReadFile(absPath); err == nil {
+		if ContentHash(existing) == entry.ContentHash {
+			return true, 0, nil
+		}
+	}
+
+	// Read encrypted object
+	encrypted, err := store.Read(entry.ContentHash)
+	if err != nil {
+		return false, 0, fmt.Errorf("warning: missing object for %s: %w", relPath, err)
+	}
+
+	// Decrypt
+	plaintext, err := crypto.Decrypt(encrypted, identity)
+	if err != nil {
+		return false, 0, fmt.Errorf("warning: cannot decrypt %s: %w", relPath, err)
+	}
+
+	// Write to claude directory
+	dir := filepath.Dir(absPath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return false, 0, err
+	}
+	if err := os.WriteFile(absPath, plaintext, 0600); err != nil {
+		return false, 0, err
+	}
+	if entry.ModTimeNs != 0 {
+		mtime := time.Unix(0, entry.ModTimeNs)
+		os.Chtimes(absPath, mtime, mtime)
+	}
+
+	if verbose {
+		fmt.Printf("  [restore] %s (%s)\n", relPath, FormatSize(entry.SizePlaintext))
+	}
+
+	return false, int64(len(plaintext)), nil
 }
