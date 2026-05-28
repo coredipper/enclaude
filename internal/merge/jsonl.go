@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,13 +19,23 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 	var entries []jsonlEntry
 
 	for _, data := range [][]byte{ours, theirs} {
-		lines := splitLines(string(data))
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
+		for len(data) > 0 {
+			var lineBytes []byte
+			idx := bytes.IndexByte(data, '\n')
+			if idx >= 0 {
+				lineBytes = data[:idx]
+				data = data[idx+1:]
+			} else {
+				lineBytes = data
+				data = nil
+			}
+
+			lineBytes = bytes.TrimSpace(lineBytes)
+			if len(lineBytes) == 0 {
 				continue
 			}
 
+			line := string(lineBytes)
 			hash := hashNormalized(line)
 			if _, exists := seen[hash]; exists {
 				continue
