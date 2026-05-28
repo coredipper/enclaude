@@ -455,3 +455,87 @@ func TestObjectStoreWriteReadExists(t *testing.T) {
 		t.Fatal("Read() returned different data")
 	}
 }
+
+func TestStatus(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	// Scenario 1: Uninitialized seal store
+	// Status should report all managed files as Added
+	initialStatus, err := Status(cfg)
+	if err != nil {
+		t.Fatalf("initial Status() error: %v", err)
+	}
+	if len(initialStatus.Added) == 0 {
+		t.Errorf("initial Status() reported 0 Added files, expected > 0")
+	}
+	if len(initialStatus.Modified) > 0 {
+		t.Errorf("initial Status() reported %d Modified files, expected 0", len(initialStatus.Modified))
+	}
+	if len(initialStatus.Deleted) > 0 {
+		t.Errorf("initial Status() reported %d Deleted files, expected 0", len(initialStatus.Deleted))
+	}
+
+	// Seal to sync state
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	// Scenario 2: Synced state
+	// Status should report no changes
+	syncedStatus, err := Status(cfg)
+	if err != nil {
+		t.Fatalf("synced Status() error: %v", err)
+	}
+	if len(syncedStatus.Added) > 0 || len(syncedStatus.Modified) > 0 || len(syncedStatus.Deleted) > 0 {
+		t.Errorf("synced Status() reported changes: %+v, expected none", syncedStatus)
+	}
+
+	// Scenario 3: Mixed changes
+	// Modify a file
+	historyPath := filepath.Join(claudeDir, "history.jsonl")
+	f, _ := os.OpenFile(historyPath, os.O_APPEND|os.O_WRONLY, 0644)
+	f.WriteString(`{"display":"new status entry","timestamp":3}` + "\n")
+	f.Close()
+
+	// Add a new file
+	newSessionPath := filepath.Join(claudeDir, "projects", "proj-a", "status-new.jsonl")
+	os.WriteFile(newSessionPath, []byte(`{"type":"user","message":"status"}`+"\n"), 0644)
+
+	// Delete a file
+	deletePath := filepath.Join(claudeDir, "CLAUDE.md")
+	os.Remove(deletePath)
+
+	mixedStatus, err := Status(cfg)
+	if err != nil {
+		t.Fatalf("mixed Status() error: %v", err)
+	}
+
+	// Verify modified
+	if len(mixedStatus.Modified) != 1 || mixedStatus.Modified[0] != "history.jsonl" {
+		t.Errorf("mixed Status() Modified = %v, expected [history.jsonl]", mixedStatus.Modified)
+	}
+
+	// Verify added
+	foundAdded := false
+	for _, added := range mixedStatus.Added {
+		if added == "projects/proj-a/status-new.jsonl" {
+			foundAdded = true
+			break
+		}
+	}
+	if !foundAdded {
+		t.Errorf("mixed Status() Added = %v, expected it to contain projects/proj-a/status-new.jsonl", mixedStatus.Added)
+	}
+	if len(mixedStatus.Added) != 1 {
+		t.Errorf("mixed Status() expected 1 Added file, got %d", len(mixedStatus.Added))
+	}
+
+	// Verify deleted
+	if len(mixedStatus.Deleted) != 1 || mixedStatus.Deleted[0] != "CLAUDE.md" {
+		t.Errorf("mixed Status() Deleted = %v, expected [CLAUDE.md]", mixedStatus.Deleted)
+	}
+}
