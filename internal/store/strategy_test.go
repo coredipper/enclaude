@@ -72,8 +72,8 @@ func TestPatternSpecificityDeeperBeatsShallower(t *testing.T) {
 
 func TestResolveMergeStrategy(t *testing.T) {
 	strategies := map[string]string{
-		"history.jsonl": "jsonl_dedup",
-		"**/*.jsonl":    "last_write_wins",
+		"history.jsonl":                  "jsonl_dedup",
+		"**/*.jsonl":                     "last_write_wins",
 		"projects/*/sessions-index.json": "sessions_index",
 	}
 
