@@ -264,3 +264,72 @@ func TestConfigMergeDriverQuoting(t *testing.T) {
 		t.Errorf("expected git special tokens to remain unquoted, got %s", out)
 	}
 }
+
+func TestFetch(t *testing.T) {
+	// Create temporary directories for remote and local repos
+	tmpDir := t.TempDir()
+	remoteDir := filepath.Join(tmpDir, "remote")
+	localDir := filepath.Join(tmpDir, "local")
+
+	if err := os.MkdirAll(remoteDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(localDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Initialize remote repo
+	remoteGit := New(remoteDir)
+	if err := remoteGit.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remoteGit.run("config", "user.name", "Test User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remoteGit.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create and commit a file in remote repo
+	testFile := filepath.Join(remoteDir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := remoteGit.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if err := remoteGit.Commit("initial commit"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Initialize local repo
+	localGit := New(localDir)
+	if err := localGit.Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("successful fetch", func(t *testing.T) {
+		// Link local repo to remote
+		if err := localGit.RemoteAdd("origin", remoteDir); err != nil {
+			t.Fatal(err)
+		}
+
+		// Perform fetch
+		out, err := localGit.Fetch("origin")
+		if err != nil {
+			t.Fatalf("Fetch failed: %v, output: %s", err, out)
+		}
+
+		// Verify fetch succeeded (check FETCH_HEAD exists)
+		if _, err := os.Stat(filepath.Join(localDir, ".git", "FETCH_HEAD")); err != nil {
+			t.Errorf("FETCH_HEAD not found, fetch may have failed: %v", err)
+		}
+	})
+
+	t.Run("fetch nonexistent remote", func(t *testing.T) {
+		_, err := localGit.Fetch("nonexistent")
+		if err == nil {
+			t.Fatal("Expected fetch of nonexistent remote to fail, but it succeeded")
+		}
+	})
+}
