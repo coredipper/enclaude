@@ -523,3 +523,98 @@ func TestGitInit(t *testing.T) {
 		}
 	})
 }
+
+// TestPull verifies Pull's reported stats against a local-path upstream:
+// it returns UpToDate when no new commits exist, and otherwise reports the
+// fetched Commits and FilesChanged counts after the upstream advances.
+func TestPull(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Upstream repo
+	upstreamDir := filepath.Join(tmp, "upstream")
+	if err := os.MkdirAll(upstreamDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	upstream := New(upstreamDir)
+	if err := upstream.Init(); err != nil {
+		t.Fatal(err)
+	}
+	upstream.run("config", "user.name", "Test User")
+	upstream.run("config", "user.email", "test@example.com")
+	upstream.run("config", "receive.denyCurrentBranch", "ignore")
+
+	file1 := filepath.Join(upstreamDir, "file1.txt")
+	os.WriteFile(file1, []byte("content1"), 0644)
+	if err := upstream.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if err := upstream.Commit("initial commit"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Downstream repo
+	downstreamDir := filepath.Join(tmp, "downstream")
+	if err := os.MkdirAll(downstreamDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	downstream := New(downstreamDir)
+	if err := downstream.Init(); err != nil {
+		t.Fatal(err)
+	}
+	downstream.run("config", "user.name", "Test User 2")
+	downstream.run("config", "user.email", "test2@example.com")
+
+	if err := downstream.RemoteAdd("origin", upstreamDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := downstream.Fetch("origin"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Determine the default branch from upstream
+	branchOut, _ := upstream.run("branch", "--show-current")
+	branch := strings.TrimSpace(branchOut)
+	if branch == "" {
+		branch = "main" // fallback
+	}
+
+	// Checkout to create tracking branch locally
+	if _, err := downstream.run("checkout", "-b", branch, "origin/"+branch); err != nil {
+		t.Fatalf("Failed to checkout tracking branch: %v", err)
+	}
+
+	// 1. "Already up to date" check
+	stats, out, err := downstream.Pull("origin", branch)
+	if err != nil {
+		t.Fatalf("Pull failed: %v\nOutput: %s", err, out)
+	}
+	if !stats.UpToDate {
+		t.Errorf("Expected UpToDate=true, got %v", stats.UpToDate)
+	}
+
+	// 2. New commit in upstream
+	file2 := filepath.Join(upstreamDir, "file2.txt")
+	os.WriteFile(file2, []byte("content2"), 0644)
+	if err := upstream.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if err := upstream.Commit("second commit"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pull should fetch 1 commit, 1 file changed
+	stats, out, err = downstream.Pull("origin", branch)
+	if err != nil {
+		t.Fatalf("Pull failed: %v\nOutput: %s", err, out)
+	}
+	if stats.UpToDate {
+		t.Errorf("Expected UpToDate=false, got true")
+	}
+	if stats.Commits != 1 {
+		t.Errorf("Expected 1 commit, got %d", stats.Commits)
+	}
+	if stats.FilesChanged != 1 {
+		t.Errorf("Expected 1 file changed, got %d", stats.FilesChanged)
+	}
+}
