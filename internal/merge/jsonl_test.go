@@ -370,6 +370,8 @@ func TestSplitLines(t *testing.T) {
 	}
 }
 
+// BenchmarkMergeJSONL measures MergeJSONL throughput on two JSONL inputs that
+// share overlapping lines requiring deduplication.
 func BenchmarkMergeJSONL(b *testing.B) {
 	ours := []byte(`{"event":"a","timestamp":"2024-01-01T00:00:00Z","data":"something"}
 {"event":"b","timestamp":"2024-01-02T00:00:00Z","data":"something else"}
