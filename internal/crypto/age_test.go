@@ -91,6 +91,9 @@ func TestDecryptWithWrongPassphrase(t *testing.T) {
 	}
 }
 
+// TestDecryptWithPassphrase_KnownCiphertext verifies that DecryptWithPassphrase
+// recovers the expected plaintext from a fixed, pre-generated age ciphertext,
+// pinning compatibility of the on-disk format across changes.
 func TestDecryptWithPassphrase_KnownCiphertext(t *testing.T) {
 	// The plaintext is "known plaintext for testing"
 	// Encrypted with passphrase "stable-passphrase-42"
@@ -114,6 +117,8 @@ func TestDecryptWithPassphrase_KnownCiphertext(t *testing.T) {
 	}
 }
 
+// TestDecryptWithPassphrase_EmptyPassphrase verifies that DecryptWithPassphrase
+// rejects an empty passphrase with an error rather than attempting decryption.
 func TestDecryptWithPassphrase_EmptyPassphrase(t *testing.T) {
 	_, err := DecryptWithPassphrase([]byte("some ciphertext"), "")
 	if err == nil {
@@ -121,6 +126,8 @@ func TestDecryptWithPassphrase_EmptyPassphrase(t *testing.T) {
 	}
 }
 
+// TestEncryptWithPassphrase_EmptyPassphrase verifies that EncryptWithPassphrase
+// rejects an empty passphrase with an error rather than producing ciphertext.
 func TestEncryptWithPassphrase_EmptyPassphrase(t *testing.T) {
 	_, err := EncryptWithPassphrase([]byte("some plaintext"), "")
 	if err == nil {
