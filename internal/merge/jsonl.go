@@ -60,11 +60,11 @@ func MergeSessionsIndex(ours, theirs []byte) ([]byte, error) {
 		rest    map[string]json.RawMessage
 	}
 
-	oursEntries, err := parseIndexEntries(ours)
+	oursObj, oursEntries, err := parseIndexFile(ours)
 	if err != nil {
 		return nil, fmt.Errorf("parsing ours: %w", err)
 	}
-	theirsEntries, err := parseIndexEntries(theirs)
+	theirsObj, theirsEntries, err := parseIndexFile(theirs)
 	if err != nil {
 		return nil, fmt.Errorf("parsing theirs: %w", err)
 	}
@@ -95,10 +95,6 @@ func MergeSessionsIndex(ours, theirs []byte) ([]byte, error) {
 	// Build output — merge top-level keys from both sides.
 	// Start with theirs, then overlay ours so ours takes precedence
 	// for shared keys. This preserves metadata from theirs that ours lacks.
-	var theirsObj, oursObj map[string]json.RawMessage
-	json.Unmarshal(theirs, &theirsObj)
-	json.Unmarshal(ours, &oursObj)
-
 	outObj := make(map[string]json.RawMessage)
 	for k, v := range theirsObj {
 		outObj[k] = v
@@ -179,20 +175,20 @@ func extractField(raw json.RawMessage, field string) string {
 	return ""
 }
 
-func parseIndexEntries(data []byte) ([]json.RawMessage, error) {
+func parseIndexFile(data []byte) (map[string]json.RawMessage, []json.RawMessage, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(data, &obj); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	entriesRaw, ok := obj["entries"]
 	if !ok {
-		return nil, nil
+		return obj, nil, nil
 	}
 
 	var entries []json.RawMessage
 	if err := json.Unmarshal(entriesRaw, &entries); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return entries, nil
+	return obj, entries, nil
 }
