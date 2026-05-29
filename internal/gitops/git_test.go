@@ -618,3 +618,109 @@ func TestPull(t *testing.T) {
 		t.Errorf("Expected 1 file changed, got %d", stats.FilesChanged)
 	}
 }
+
+// TestPush covers Push and PushWithUpstream's reported stats against a bare
+// local remote: an initial push and a push after new commits report
+// NoOp=false with the right Commits count, while re-pushing an unchanged
+// branch reports NoOp=true with zero commits.
+func TestPush(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. Create a bare remote repository
+	remoteDir := filepath.Join(tmpDir, "remote.git")
+	if err := os.MkdirAll(remoteDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	remoteGit := New(remoteDir)
+	if _, err := remoteGit.run("init", "--bare"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create a local repository
+	localDir := filepath.Join(tmpDir, "local")
+	if err := os.MkdirAll(localDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	g := New(localDir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.name", "Test User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("branch", "-M", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Add remote
+	if err := g.RemoteAdd("origin", remoteDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Initial commit and push
+	f := filepath.Join(localDir, "test.txt")
+	if err := os.WriteFile(f, []byte("v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Commit("initial"); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("PushWithUpstream initial", func(t *testing.T) {
+		stats, out, err := g.PushWithUpstream("origin", "main")
+		if err != nil {
+			t.Fatalf("PushWithUpstream failed: %v\nOutput: %s", err, out)
+		}
+		if stats.NoOp {
+			t.Error("Expected NoOp to be false on initial push")
+		}
+		if stats.Commits != 1 {
+			t.Errorf("Expected 1 commit, got %d", stats.Commits)
+		}
+		// Note: local pushes without transfer may emit empty stderr or varying formats
+		// in newer git versions (like the local go1.24.3 toolchain in tests).
+		// We can't strictly assert stats.Objects > 0 on all local platforms.
+	})
+
+	t.Run("Push no-op", func(t *testing.T) {
+		stats, out, err := g.Push("origin", "main")
+		if err != nil {
+			t.Fatalf("Push failed: %v\nOutput: %s", err, out)
+		}
+		if !stats.NoOp {
+			t.Error("Expected NoOp to be true on unchanged push")
+		}
+		if stats.Commits != 0 {
+			t.Errorf("Expected 0 commits on no-op, got %d", stats.Commits)
+		}
+	})
+
+	t.Run("Push with new commits", func(t *testing.T) {
+		if err := os.WriteFile(f, []byte("v2"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.AddAll(); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.Commit("update"); err != nil {
+			t.Fatal(err)
+		}
+
+		stats, out, err := g.Push("origin", "main")
+		if err != nil {
+			t.Fatalf("Push failed: %v\nOutput: %s", err, out)
+		}
+		if stats.NoOp {
+			t.Error("Expected NoOp to be false on push with changes")
+		}
+		if stats.Commits != 1 {
+			t.Errorf("Expected 1 commit, got %d", stats.Commits)
+		}
+	})
+}
