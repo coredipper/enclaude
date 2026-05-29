@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// TestSealLock_Basic verifies a second SealLock.Acquire on the same dir
+// blocks until its timeout and fails with a deadline error while the first
+// holder is active, then succeeds once the first lock is released.
 func TestSealLock_Basic(t *testing.T) {
 	dir := t.TempDir()
 	lock1 := NewSealLock(dir)
@@ -55,6 +58,8 @@ func TestSealLock_Basic(t *testing.T) {
 	lock2.Release()
 }
 
+// TestSealLock_ReleaseWithoutAcquire verifies Release on a never-acquired
+// lock is a no-op and returns no error.
 func TestSealLock_ReleaseWithoutAcquire(t *testing.T) {
 	dir := t.TempDir()
 	lock := NewSealLock(dir)
@@ -65,6 +70,9 @@ func TestSealLock_ReleaseWithoutAcquire(t *testing.T) {
 	}
 }
 
+// TestSealLock_PermissionDenied verifies Acquire fails with a permission
+// error when the lock directory is read-only and the lock file cannot be
+// created.
 func TestSealLock_PermissionDenied(t *testing.T) {
 	dir := t.TempDir()
 
