@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+// TestNewObjectStore verifies NewObjectStore roots the store at the
+// "objects" subdirectory of the given seal dir.
 func TestNewObjectStore(t *testing.T) {
 	sealDir := "/path/to/seal"
 	store := NewObjectStore(sealDir)
@@ -17,6 +19,8 @@ func TestNewObjectStore(t *testing.T) {
 	}
 }
 
+// TestObjectPath verifies ObjectPath shards a content hash into a
+// two-char prefix directory and an ".age" object file.
 func TestObjectPath(t *testing.T) {
 	store := &ObjectStore{dir: "/objects"}
 	hash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -28,6 +32,8 @@ func TestObjectPath(t *testing.T) {
 	}
 }
 
+// TestObjectStore_Init verifies Init creates the object store directory
+// when it does not already exist.
 func TestObjectStore_Init(t *testing.T) {
 	tmpDir := t.TempDir()
 	sealDir := filepath.Join(tmpDir, "seal")
@@ -50,6 +56,9 @@ func TestObjectStore_Init(t *testing.T) {
 	}
 }
 
+// TestObjectStore_WriteReadExists covers the write/read/exists round trip:
+// a missing object reports absent and fails to read, and after Write it
+// reports present and reads back byte-identical.
 func TestObjectStore_WriteReadExists(t *testing.T) {
 	store := NewObjectStore(t.TempDir())
 
@@ -86,6 +95,8 @@ func TestObjectStore_WriteReadExists(t *testing.T) {
 	}
 }
 
+// TestObjectStore_Delete verifies Delete removes a written object so it no
+// longer reports as existing.
 func TestObjectStore_Delete(t *testing.T) {
 	store := NewObjectStore(t.TempDir())
 
@@ -112,6 +123,9 @@ func TestObjectStore_Delete(t *testing.T) {
 	}
 }
 
+// TestObjectStore_ListAll verifies ListAll reconstructs hashes from the
+// sharded layout and skips non-conforming entries (stray files, prefix dirs
+// of the wrong length, non-.age files, and directories named like objects).
 func TestObjectStore_ListAll(t *testing.T) {
 	store := NewObjectStore(t.TempDir())
 
