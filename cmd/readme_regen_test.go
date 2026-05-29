@@ -56,7 +56,11 @@ func TestReadmeRegenCommitDoesNotCaptureOtherStagedFiles(t *testing.T) {
 }
 func runGit(t *testing.T, repoDir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
+	path, err := exec.LookPath("git")
+	if err != nil {
+		path = "git"
+	}
+	cmd := exec.Command(path, append([]string{"-C", repoDir}, args...)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
