@@ -274,6 +274,8 @@ func TestRotateReEncrypts(t *testing.T) {
 	}
 }
 
+// TestVerifyNoManifest verifies Verify fails with "no manifest found" when
+// the seal store has no manifest yet.
 func TestVerifyNoManifest(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -292,6 +294,8 @@ func TestVerifyNoManifest(t *testing.T) {
 	}
 }
 
+// TestVerifyInvalidManifest verifies Verify fails when the manifest file
+// exists but contains malformed JSON.
 func TestVerifyInvalidManifest(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -308,6 +312,8 @@ func TestVerifyInvalidManifest(t *testing.T) {
 	}
 }
 
+// TestVerifyReadError verifies Verify flags an object as corrupt when its
+// blob cannot be read (here the object path is replaced by a directory).
 func TestVerifyReadError(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -351,6 +357,8 @@ func TestVerifyReadError(t *testing.T) {
 	}
 }
 
+// TestVerifyDecryptError verifies Verify flags an object as corrupt when its
+// blob is not a valid age ciphertext and fails to decrypt.
 func TestVerifyDecryptError(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -392,6 +400,8 @@ func TestVerifyDecryptError(t *testing.T) {
 	}
 }
 
+// TestVerifyHashMismatch verifies Verify flags an object as corrupt when it
+// decrypts cleanly but its plaintext hash no longer matches the manifest entry.
 func TestVerifyHashMismatch(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -435,6 +445,8 @@ func TestVerifyHashMismatch(t *testing.T) {
 	}
 }
 
+// TestVerifyListObjectsError verifies Verify fails when the object store
+// cannot be enumerated (here the objects directory is replaced by a file).
 func TestVerifyListObjectsError(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
