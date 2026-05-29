@@ -468,3 +468,58 @@ func TestGitFetch(t *testing.T) {
 		}
 	})
 }
+
+// TestGitInit covers Init: it creates the .git directory, is idempotent
+// when run twice on the same repo, and returns an error when the target
+// path is an existing file rather than a directory.
+func TestGitInit(t *testing.T) {
+	t.Run("HappyPath", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		g := New(tmpDir)
+		if err := g.Init(); err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+
+		// Verify .git directory is created
+		gitDir := filepath.Join(tmpDir, ".git")
+		info, err := os.Stat(gitDir)
+		if err != nil {
+			t.Fatalf("Failed to stat .git directory: %v", err)
+		}
+		if !info.IsDir() {
+			t.Errorf("Expected .git to be a directory")
+		}
+	})
+
+	t.Run("Idempotency", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		g := New(tmpDir)
+		if err := g.Init(); err != nil {
+			t.Fatalf("First Init failed: %v", err)
+		}
+
+		// Second Init should also succeed
+		if err := g.Init(); err != nil {
+			t.Fatalf("Second Init failed, not idempotent: %v", err)
+		}
+	})
+
+	t.Run("ErrorCondition", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create a file where the git repo root should be
+		// Wait, New(dir) doesn't take the .git folder, it takes the working directory.
+		// So to cause git init to fail, we can make the working directory itself a file.
+
+		filePath := filepath.Join(tmpDir, "repo-file")
+		if err := os.WriteFile(filePath, []byte("data"), 0644); err != nil {
+			t.Fatalf("Failed to create file: %v", err)
+		}
+
+		g := New(filePath)
+		err := g.Init()
+		if err == nil {
+			t.Fatal("Expected Init to fail when directory path is an existing file, but it succeeded")
+		}
+	})
+}
