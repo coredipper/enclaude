@@ -456,6 +456,10 @@ func TestObjectStoreWriteReadExists(t *testing.T) {
 	}
 }
 
+// TestStatus exercises Status across an uninitialized store (everything
+// Added), a freshly sealed store (no changes), and a mixed working tree with a
+// modified, an added, and a deleted file, verifying each lands in the right
+// bucket.
 func TestStatus(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
