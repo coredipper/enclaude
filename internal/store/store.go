@@ -333,6 +333,42 @@ func isSessionPath(relPath string) bool {
 	return strings.HasPrefix(relPath, "projects/") && strings.HasSuffix(relPath, ".jsonl")
 }
 
+// unsealFile decrypts a single file and writes it to the claude directory.
+func unsealFile(store *ObjectStore, identity age.Identity, entry FileEntry, absPath, relPath string, verbose bool) (int, error) {
+	// Read encrypted object
+	encrypted, err := store.Read(entry.ContentHash)
+	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "  warning: missing object for %s: %v\n", relPath, err)
+		}
+		return 0, err
+	}
+
+	// Decrypt
+	plaintext, err := crypto.Decrypt(encrypted, identity)
+	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "  warning: cannot decrypt %s: %v\n", relPath, err)
+		}
+		return 0, err
+	}
+
+	// Write to claude directory
+	dir := filepath.Dir(absPath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(absPath, plaintext, 0600); err != nil {
+		return 0, err
+	}
+	if entry.ModTimeNs != 0 {
+		mtime := time.Unix(0, entry.ModTimeNs)
+		os.Chtimes(absPath, mtime, mtime)
+	}
+
+	return len(plaintext), nil
+}
+
 // Unseal decrypts seal contents back to claudeDir and removes managed
 // files not in the manifest. The manifest is the source of truth.
 func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress ProgressFunc) (stats UnsealStats, err error) {
@@ -376,46 +412,17 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 			}
 		}
 
-		// Read encrypted object
-		encrypted, err := store.Read(entry.ContentHash)
+		bytesDecrypted, err := unsealFile(store, identity, entry, absPath, relPath, verbose)
 		if err != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: missing object for %s: %v\n", relPath, err)
-			}
 			stats.Errors++
 			continue
-		}
-
-		// Decrypt
-		plaintext, err := crypto.Decrypt(encrypted, identity)
-		if err != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: cannot decrypt %s: %v\n", relPath, err)
-			}
-			stats.Errors++
-			continue
-		}
-
-		// Write to claude directory
-		dir := filepath.Dir(absPath)
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			stats.Errors++
-			continue
-		}
-		if err := os.WriteFile(absPath, plaintext, 0600); err != nil {
-			stats.Errors++
-			continue
-		}
-		if entry.ModTimeNs != 0 {
-			mtime := time.Unix(0, entry.ModTimeNs)
-			os.Chtimes(absPath, mtime, mtime)
 		}
 
 		if verbose {
 			fmt.Printf("  [restore] %s (%s)\n", relPath, FormatSize(entry.SizePlaintext))
 		}
 		stats.Restored++
-		stats.BytesDecrypted += int64(len(plaintext))
+		stats.BytesDecrypted += int64(bytesDecrypted)
 	}
 
 	// Delete managed files not in the manifest. The manifest is the source
