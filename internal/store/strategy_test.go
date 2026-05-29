@@ -71,15 +71,20 @@ func TestPatternSpecificityDeeperBeatsShallower(t *testing.T) {
 }
 
 // TestResolveMergeStrategyWildcardGlobFallback verifies a file with no exact
-// match falls through to a wildcard glob pattern (here **/*.jsonl) rather than
-// a built-in default, exercising the glob branch of ResolveMergeStrategy.
+// match resolves via a wildcard glob pattern (**/*.jsonl) rather than a
+// built-in default. It asserts on the matched pattern, not just the strategy:
+// the wildcard's strategy (last_write_wins) equals the default for unknown
+// non-.md files, so the strategy alone cannot prove the glob branch was taken.
 func TestResolveMergeStrategyWildcardGlobFallback(t *testing.T) {
 	strategies := map[string]string{
 		"history.jsonl": "jsonl_dedup",
 		"**/*.jsonl":    "last_write_wins",
 	}
-	strategy := ResolveMergeStrategy("other.jsonl", strategies)
+	strategy, pattern := ResolveMergeStrategyWithPattern("other.jsonl", strategies)
+	if pattern != "**/*.jsonl" {
+		t.Errorf("expected match via **/*.jsonl glob, got pattern %q (default fallback?)", pattern)
+	}
 	if strategy != "last_write_wins" {
-		t.Errorf("expected last_write_wins via **/*.jsonl glob, got %s", strategy)
+		t.Errorf("expected last_write_wins, got %s", strategy)
 	}
 }
