@@ -563,6 +563,11 @@ func TestPull(t *testing.T) {
 	}
 	downstream.run("config", "user.name", "Test User 2")
 	downstream.run("config", "user.email", "test2@example.com")
+	// Force fast-forward-only pulls so the fetched-commit count is deterministic
+	// regardless of the caller's global pull.ff / merge configuration.
+	if _, err := downstream.run("config", "pull.ff", "only"); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := downstream.RemoteAdd("origin", upstreamDir); err != nil {
 		t.Fatal(err)
@@ -672,55 +677,54 @@ func TestPush(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Run("PushWithUpstream initial", func(t *testing.T) {
-		stats, out, err := g.PushWithUpstream("origin", "main")
-		if err != nil {
-			t.Fatalf("PushWithUpstream failed: %v\nOutput: %s", err, out)
-		}
-		if stats.NoOp {
-			t.Error("Expected NoOp to be false on initial push")
-		}
-		if stats.Commits != 1 {
-			t.Errorf("Expected 1 commit, got %d", stats.Commits)
-		}
-		// Note: local pushes without transfer may emit empty stderr or varying formats
-		// in newer git versions (like the local go1.24.3 toolchain in tests).
-		// We can't strictly assert stats.Objects > 0 on all local platforms.
-	})
+	// This is one ordered scenario (initial push -> no-op -> new commit), not
+	// independent subtests: each step depends on the prior push state. Kept
+	// linear so a filtered `-run` of a single step can't skip the setup.
 
-	t.Run("Push no-op", func(t *testing.T) {
-		stats, out, err := g.Push("origin", "main")
-		if err != nil {
-			t.Fatalf("Push failed: %v\nOutput: %s", err, out)
-		}
-		if !stats.NoOp {
-			t.Error("Expected NoOp to be true on unchanged push")
-		}
-		if stats.Commits != 0 {
-			t.Errorf("Expected 0 commits on no-op, got %d", stats.Commits)
-		}
-	})
+	// Initial push creates the upstream branch: NoOp=false, 1 commit.
+	stats, out, err := g.PushWithUpstream("origin", "main")
+	if err != nil {
+		t.Fatalf("PushWithUpstream failed: %v\nOutput: %s", err, out)
+	}
+	if stats.NoOp {
+		t.Error("Expected NoOp to be false on initial push")
+	}
+	if stats.Commits != 1 {
+		t.Errorf("Expected 1 commit, got %d", stats.Commits)
+	}
+	// Note: local pushes without transfer may emit empty stderr or varying
+	// formats in newer git versions, so we don't assert stats.Objects here.
 
-	t.Run("Push with new commits", func(t *testing.T) {
-		if err := os.WriteFile(f, []byte("v2"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if err := g.AddAll(); err != nil {
-			t.Fatal(err)
-		}
-		if err := g.Commit("update"); err != nil {
-			t.Fatal(err)
-		}
+	// Re-pushing the unchanged branch is a no-op: NoOp=true, 0 commits.
+	stats, out, err = g.Push("origin", "main")
+	if err != nil {
+		t.Fatalf("Push failed: %v\nOutput: %s", err, out)
+	}
+	if !stats.NoOp {
+		t.Error("Expected NoOp to be true on unchanged push")
+	}
+	if stats.Commits != 0 {
+		t.Errorf("Expected 0 commits on no-op, got %d", stats.Commits)
+	}
 
-		stats, out, err := g.Push("origin", "main")
-		if err != nil {
-			t.Fatalf("Push failed: %v\nOutput: %s", err, out)
-		}
-		if stats.NoOp {
-			t.Error("Expected NoOp to be false on push with changes")
-		}
-		if stats.Commits != 1 {
-			t.Errorf("Expected 1 commit, got %d", stats.Commits)
-		}
-	})
+	// After a new commit, push reports NoOp=false with 1 commit.
+	if err := os.WriteFile(f, []byte("v2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Commit("update"); err != nil {
+		t.Fatal(err)
+	}
+	stats, out, err = g.Push("origin", "main")
+	if err != nil {
+		t.Fatalf("Push failed: %v\nOutput: %s", err, out)
+	}
+	if stats.NoOp {
+		t.Error("Expected NoOp to be false on push with changes")
+	}
+	if stats.Commits != 1 {
+		t.Errorf("Expected 1 commit, got %d", stats.Commits)
+	}
 }
