@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// TestNewManifest verifies NewManifest stamps version 2, the given device
+// ID, an empty (non-nil) files map, and a valid RFC3339 sealed-at time.
 func TestNewManifest(t *testing.T) {
 	deviceID := "test-device-id"
 	m := NewManifest(deviceID)
@@ -30,6 +32,9 @@ func TestNewManifest(t *testing.T) {
 	}
 }
 
+// TestLoadManifest covers LoadManifest across a missing file (nil, nil), a
+// valid manifest, one omitting the files field (map defaulted to non-nil),
+// and malformed JSON (error, nil manifest).
 func TestLoadManifest(t *testing.T) {
 	sealDir := t.TempDir()
 
@@ -97,6 +102,8 @@ func TestLoadManifest(t *testing.T) {
 	}
 }
 
+// TestManifestSave verifies Save writes a manifest that LoadManifest reads
+// back with the same device ID and file entries.
 func TestManifestSave(t *testing.T) {
 	sealDir := t.TempDir()
 
@@ -124,7 +131,8 @@ func TestManifestSave(t *testing.T) {
 	}
 }
 
-// Add extra tests to hit missing coverage
+// TestLoadManifest_ReadError verifies LoadManifest errors when manifest.json
+// cannot be read because it is a directory rather than a file.
 func TestLoadManifest_ReadError(t *testing.T) {
 	sealDir := t.TempDir()
 
@@ -140,7 +148,8 @@ func TestLoadManifest_ReadError(t *testing.T) {
 	}
 }
 
-// Add extra tests to hit missing coverage
+// TestManifestDiff_OtherNotNil verifies Diff against a non-nil prior manifest
+// classifies entries as added, modified (hash changed), and deleted.
 func TestManifestDiff_OtherNotNil(t *testing.T) {
 	oldManifest := NewManifest("device1")
 	oldManifest.Files = map[string]FileEntry{
@@ -169,7 +178,8 @@ func TestManifestDiff_OtherNotNil(t *testing.T) {
 	}
 }
 
-// Add test for empty map handling in Diff
+// TestManifestDiff_OtherNilEmptyMap verifies Diff against a nil prior manifest
+// treats every current file as added.
 func TestManifestDiff_OtherNilEmptyMap(t *testing.T) {
 	m := NewManifest("device1")
 	m.Files = map[string]FileEntry{
