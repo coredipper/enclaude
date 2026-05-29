@@ -12,6 +12,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// TestPushE2E exercises runPush end to end against a real git repo and bare
+// remote: it errors when the remote is unconfigured, seals and pushes while
+// creating the upstream on the first push, and pushes a fresh seal commit on
+// subsequent runs.
 func TestPushE2E(t *testing.T) {
 	// Setup environment
 	claudeDir := t.TempDir()
