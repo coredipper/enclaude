@@ -387,3 +387,84 @@ func TestMerge(t *testing.T) {
 		}
 	})
 }
+
+// TestGitFetch verifies Fetch populates remote-tracking refs from a
+// local-path remote on success and returns an error for a nonexistent
+// remote.
+func TestGitFetch(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Setup upstream repo
+	upstreamDir := filepath.Join(tmpDir, "upstream")
+	if err := os.MkdirAll(upstreamDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	upstreamGit := New(upstreamDir)
+	if err := upstreamGit.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := upstreamGit.run("config", "user.name", "Test User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := upstreamGit.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a commit in upstream so there's something to fetch
+	f := filepath.Join(upstreamDir, "file.txt")
+	if err := os.WriteFile(f, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := upstreamGit.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if err := upstreamGit.Commit("initial"); err != nil {
+		t.Fatal(err)
+	}
+	// Normalize the branch name so the fetch assertion is deterministic
+	// regardless of the environment's init.defaultBranch (e.g. trunk).
+	if _, err := upstreamGit.run("branch", "-M", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Setup local repo
+	localDir := filepath.Join(tmpDir, "local")
+	if err := os.MkdirAll(localDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	localGit := New(localDir)
+	if err := localGit.Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add upstream as remote
+	if err := localGit.RemoteAdd("origin", upstreamDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test successful fetch
+	t.Run("Success", func(t *testing.T) {
+		out, err := localGit.Fetch("origin")
+		if err != nil {
+			t.Fatalf("Fetch failed: %v\nOutput: %s", err, out)
+		}
+
+		// Verify branches were fetched: the upstream branch was normalized to
+		// main above, so origin/main must be present after the fetch.
+		branches, err := localGit.run("branch", "-r")
+		if err != nil {
+			t.Fatalf("Failed to list remote branches: %v", err)
+		}
+		if !strings.Contains(branches, "origin/main") {
+			t.Errorf("Expected origin/main in remote branches list, got: %q", branches)
+		}
+	})
+
+	// Test error case with nonexistent remote
+	t.Run("NonexistentRemote", func(t *testing.T) {
+		out, err := localGit.Fetch("does-not-exist")
+		if err == nil {
+			t.Fatalf("Expected error when fetching from nonexistent remote, got success. Output: %s", out)
+		}
+	})
+}
