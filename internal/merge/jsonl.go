@@ -25,7 +25,7 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 				continue
 			}
 
-			hash := hashNormalized(line)
+			hash, timestamp := parseJSONLine(line)
 			if _, exists := seen[hash]; exists {
 				continue
 			}
@@ -33,7 +33,7 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 
 			entries = append(entries, jsonlEntry{
 				line:      line,
-				timestamp: extractTimestamp(line),
+				timestamp: timestamp,
 			})
 		}
 	}
@@ -121,47 +121,37 @@ func splitLines(s string) []string {
 	return strings.Split(s, "\n")
 }
 
-// hashNormalized computes SHA-256 of JSON with sorted keys to catch semantic duplicates.
-func hashNormalized(line string) string {
+// parseJSONLine parses a JSON line once to extract both a normalized hash
+// and a timestamp, avoiding duplicate unmarshaling overhead.
+func parseJSONLine(line string) (string, float64) {
 	var obj map[string]interface{}
 	if err := json.Unmarshal([]byte(line), &obj); err != nil {
 		// Not valid JSON — hash the raw line
 		h := sha256.Sum256([]byte(line))
-		return hex.EncodeToString(h[:])
+		return hex.EncodeToString(h[:]), 0
+	}
+
+	// Calculate timestamp
+	var ts float64
+	if tsFloat, ok := obj["timestamp"].(float64); ok {
+		ts = tsFloat
+	} else if tsStr, ok := obj["timestamp"].(string); ok {
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+			if t, err := time.Parse(layout, tsStr); err == nil {
+				ts = float64(t.UnixNano())
+				break
+			}
+		}
 	}
 
 	normalized, err := json.Marshal(obj)
 	if err != nil {
 		h := sha256.Sum256([]byte(line))
-		return hex.EncodeToString(h[:])
+		return hex.EncodeToString(h[:]), ts
 	}
 
 	h := sha256.Sum256(normalized)
-	return hex.EncodeToString(h[:])
-}
-
-// extractTimestamp pulls the "timestamp" field from a JSON line for sorting.
-func extractTimestamp(line string) float64 {
-	var obj map[string]interface{}
-	if err := json.Unmarshal([]byte(line), &obj); err != nil {
-		return 0
-	}
-
-	// Try "timestamp" (history.jsonl uses Unix millis as number)
-	if ts, ok := obj["timestamp"].(float64); ok {
-		return ts
-	}
-
-	// Try "timestamp" as string (session JSONL uses ISO 8601 / RFC 3339 format)
-	if ts, ok := obj["timestamp"].(string); ok {
-		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-			if t, err := time.Parse(layout, ts); err == nil {
-				return float64(t.UnixNano())
-			}
-		}
-	}
-
-	return 0
+	return hex.EncodeToString(h[:]), ts
 }
 
 func extractField(raw json.RawMessage, field string) string {
