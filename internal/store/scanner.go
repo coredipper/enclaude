@@ -162,8 +162,26 @@ func MatchGlob(path, pattern string) bool {
 
 // matchSegments recursively matches a path string against pattern segments.
 // Handles ** as "zero or more directory levels".
-// Optimization: We avoid strings.Split on the path to eliminate slice allocations.
+//
+// It must reproduce strings.Split(path, "/") semantics exactly: every path
+// has segment count strings.Count(path, "/")+1, so "" is one (empty) segment
+// and a trailing slash ("a/b/") yields a trailing empty segment ["a","b",""].
+// Collapsing those into "no segments" would flip matches for trailing-slash
+// directory probes (the scanner passes rel+"/") and for the empty path.
+//
+// We track the remaining segments as (path, more): `more` is true whenever at
+// least one segment is still unconsumed, so the empty-segment tail survives
+// instead of being conflated with exhaustion. We avoid strings.Split on the
+// path to eliminate slice allocations.
 func matchSegments(path string, patSegs []string) bool {
+	return matchSegmentsRem(path, true, patSegs)
+}
+
+// matchSegmentsRem matches the remaining path segments — the comma-free runs of
+// path joined by '/', with `more` indicating an unconsumed segment is present —
+// against patSegs. Exhaustion is `!more`, distinct from an empty current
+// segment, which mirrors strings.Split's trailing-empty and empty-path cases.
+func matchSegmentsRem(path string, more bool, patSegs []string) bool {
 	for len(patSegs) > 0 {
 		pat := patSegs[0]
 
@@ -176,27 +194,28 @@ func matchSegments(path string, patSegs []string) bool {
 				return true
 			}
 
-			// Try matching the rest of the pattern at every position
-			remainingPath := path
+			// Try matching the rest of the pattern at every segment position,
+			// including the position past the final segment (where !more).
+			remPath, remMore := path, more
 			for {
-				if matchSegments(remainingPath, patSegs) {
+				if matchSegmentsRem(remPath, remMore, patSegs) {
 					return true
 				}
-				if remainingPath == "" {
+				if !remMore {
 					break
 				}
-				idx := strings.IndexByte(remainingPath, '/')
+				idx := strings.IndexByte(remPath, '/')
 				if idx == -1 {
-					remainingPath = ""
+					remPath, remMore = "", false
 				} else {
-					remainingPath = remainingPath[idx+1:]
+					remPath = remPath[idx+1:]
 				}
 			}
 			return false
 		}
 
 		// No more path segments but pattern still has non-** segments
-		if path == "" {
+		if !more {
 			return false
 		}
 
@@ -205,10 +224,10 @@ func matchSegments(path string, patSegs []string) bool {
 		idx := strings.IndexByte(path, '/')
 		if idx == -1 {
 			currentSegment = path
-			path = "" // Exhausted path
+			path, more = "", false // Last segment consumed
 		} else {
 			currentSegment = path[:idx]
-			path = path[idx+1:] // Move past '/'
+			path = path[idx+1:] // Move past '/'; at least the tail remains
 		}
 
 		// Match current segment with filepath.Match (handles * and ? within a segment)
@@ -221,5 +240,5 @@ func matchSegments(path string, patSegs []string) bool {
 	}
 
 	// Pattern exhausted — path must also be exhausted
-	return path == ""
+	return !more
 }

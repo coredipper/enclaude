@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -148,6 +149,138 @@ func TestMatchGlob(t *testing.T) {
 	}
 }
 
+// oldMatchGlob and oldMatchSegments reproduce the strings.Split-based matcher
+// that shipped on origin/main before matchSegments was rewritten as an
+// index-walk. They are the behavioral reference: the optimized matcher must
+// agree with them on every input, so the differential test below can pin the
+// shipped semantics against any future regression.
+func oldMatchGlob(path, pattern string) bool {
+	if !strings.Contains(pattern, "**") {
+		matched, _ := filepath.Match(pattern, path)
+		return matched
+	}
+	pathSegs := strings.Split(path, "/")
+	patSegs := strings.Split(pattern, "/")
+	return oldMatchSegments(pathSegs, patSegs)
+}
+
+func oldMatchSegments(pathSegs, patSegs []string) bool {
+	for len(patSegs) > 0 {
+		pat := patSegs[0]
+
+		if pat == "**" {
+			patSegs = patSegs[1:]
+			if len(patSegs) == 0 {
+				return true
+			}
+			for i := 0; i <= len(pathSegs); i++ {
+				if oldMatchSegments(pathSegs[i:], patSegs) {
+					return true
+				}
+			}
+			return false
+		}
+
+		if len(pathSegs) == 0 {
+			return false
+		}
+
+		matched, _ := filepath.Match(pat, pathSegs[0])
+		if !matched {
+			return false
+		}
+
+		pathSegs = pathSegs[1:]
+		patSegs = patSegs[1:]
+	}
+
+	return len(pathSegs) == 0
+}
+
+// TestMatchGlob_DifferentialAgainstOldSplit verifies that the optimized
+// index-walk matcher agrees with the shipped strings.Split-based matcher across
+// a broad matrix of (path, pattern) pairs, why: PR #54's rewrite silently
+// dropped the trailing empty segment that strings.Split("a/b/", "/") produces,
+// flipping results for non-terminal ** against trailing-slash paths (the
+// scanner deliberately probes rel+"/" for directory pruning). The known
+// divergences are pinned as explicit want rows so the old behavior stays
+// authoritative.
+func TestMatchGlob_DifferentialAgainstOldSplit(t *testing.T) {
+	paths := []string{
+		"",
+		"a",
+		"a/",
+		"a/b",
+		"a/b/",
+		"a/b/c",
+		"a/b/c/",
+		"/a",
+		"/a/b",
+		"projects/p/memory",
+		"projects/p/memory/",
+		"projects/p/memory/MEMORY.md",
+		"statsig/cache.json",
+		"statsig/",
+		"plugins/marketplace/plugin.json",
+		"b",
+		"x/b",
+		"x/y/b",
+		"a/b/b",
+	}
+	patterns := []string{
+		"a/**/b",
+		"a/**",
+		"**/b",
+		"**",
+		"**/*",
+		"*/**",
+		"**/memory",
+		"projects/**/memory",
+		"projects/*/memory/**",
+		"a/*/b",
+		"statsig/**",
+		"plugins/**",
+		"a/**/b/**",
+		"**/**",
+		"*",
+		"a",
+	}
+
+	for _, p := range paths {
+		for _, pat := range patterns {
+			want := oldMatchGlob(p, pat)
+			got := MatchGlob(p, pat)
+			if got != want {
+				t.Errorf("MatchGlob(%q, %q) = %v, want %v (old split semantics)", p, pat, got, want)
+			}
+		}
+	}
+}
+
+// TestMatchGlob_KnownDivergences guards the specific cases the review flagged
+// where PR #54's rewrite diverged from origin/main; each row asserts the OLD
+// (shipped) expected result so the rewrite cannot reintroduce the regression.
+func TestMatchGlob_KnownDivergences(t *testing.T) {
+	tests := []struct {
+		path    string
+		pattern string
+		want    bool
+	}{
+		{"a/b/", "a/**/b", false},
+		{"projects/p/memory/", "projects/**/memory", false},
+		{"a/b/", "**/b", false},
+		{"", "**/*", true},
+		{"", "*/**", true},
+	}
+
+	for _, tt := range tests {
+		got := MatchGlob(tt.path, tt.pattern)
+		if got != tt.want {
+			t.Errorf("MatchGlob(%q, %q) = %v, want %v", tt.path, tt.pattern, got, tt.want)
+		}
+	}
+}
+
 // mkUnreadableDir creates dir/noperms with mode 0000, registers cleanup that
 // restores permissions so t.TempDir() can be removed, and skips the test if
 // the directory is still readable after chmod — which happens when tests run
@@ -196,4 +329,27 @@ func TestScanFilesErrors(t *testing.T) {
 			t.Errorf("expected no results, got %d", len(results))
 		}
 	})
+}
+
+// BenchmarkMatchGlob exercises the ** glob matcher over a representative mix of
+// deep paths, non-terminal **, and trailing-slash directory probes (rel+"/"),
+// covering the allocation-sensitive index-walk path so the optimization claim
+// in PR #54 is backed by a real measurement.
+func BenchmarkMatchGlob(b *testing.B) {
+	cases := []struct{ path, pattern string }{
+		{"projects/proj-a/memory/MEMORY.md", "projects/*/memory/**"},
+		{"projects/proj-a/memory/", "projects/**/memory"},
+		{"statsig/deep/nested/file.txt", "statsig/**"},
+		{"a/b/c/d/e/f/g", "a/**/g"},
+		{"a/b/", "a/**/b"},
+		{"plugins/marketplace/plugin.json", "plugins/**"},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	var sink bool
+	for i := 0; i < b.N; i++ {
+		c := cases[i%len(cases)]
+		sink = MatchGlob(c.path, c.pattern)
+	}
+	_ = sink
 }
