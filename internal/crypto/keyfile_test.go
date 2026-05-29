@@ -6,6 +6,9 @@ import (
 	"testing"
 )
 
+// TestKeyFilePath verifies that KeyFilePath resolves the key file location in
+// precedence order: the ENCLAUDE_KEY_FILE override, then XDG_CONFIG_HOME, then
+// the ~/.config/enclaude fallback under the user home directory.
 func TestKeyFilePath(t *testing.T) {
 	// Test override
 	overridePath := "/tmp/override/key.age.enc"
@@ -47,6 +50,9 @@ func TestKeyFilePath(t *testing.T) {
 	}
 }
 
+// TestKeyFileLifecycle exercises the full key-file flow: absence before
+// creation, StoreKeyFile writing a 0600 file, LoadKeyFile round-tripping the
+// identity, rejection of a wrong passphrase, and DeleteKeyFile being idempotent.
 func TestKeyFileLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := filepath.Join(dir, "key.age.enc")
@@ -114,6 +120,8 @@ func TestKeyFileLifecycle(t *testing.T) {
 	}
 }
 
+// TestStoreKeyFile_Errors verifies that StoreKeyFile returns an error when
+// given an empty passphrase.
 func TestStoreKeyFile_Errors(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := filepath.Join(dir, "key.age.enc")
@@ -128,6 +136,8 @@ func TestStoreKeyFile_Errors(t *testing.T) {
 	}
 }
 
+// TestLoadKeyFile_Errors verifies that LoadKeyFile returns an error when the
+// key file does not exist at the resolved path.
 func TestLoadKeyFile_Errors(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := filepath.Join(dir, "key.age.enc")
@@ -140,6 +150,9 @@ func TestLoadKeyFile_Errors(t *testing.T) {
 	}
 }
 
+// TestKeyFilePath_HomeError verifies that KeyFilePath returns an error when all
+// location sources are unavailable: the override and XDG_CONFIG_HOME are empty
+// and the home directory cannot be resolved.
 func TestKeyFilePath_HomeError(t *testing.T) {
 	// Simulate error when both ENCLAUDE_KEY_FILE and XDG_CONFIG_HOME are empty
 	// and home dir cannot be found (e.g. HOME is empty)
@@ -156,6 +169,8 @@ func TestKeyFilePath_HomeError(t *testing.T) {
 	}
 }
 
+// TestKeyFileExists_PathError verifies that KeyFileExists reports false (rather
+// than panicking) when KeyFilePath cannot resolve a path.
 func TestKeyFileExists_PathError(t *testing.T) {
 	t.Setenv("ENCLAUDE_KEY_FILE", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -167,6 +182,8 @@ func TestKeyFileExists_PathError(t *testing.T) {
 	}
 }
 
+// TestStoreKeyFile_PathError verifies that StoreKeyFile propagates the error
+// when KeyFilePath cannot resolve a destination path.
 func TestStoreKeyFile_PathError(t *testing.T) {
 	t.Setenv("ENCLAUDE_KEY_FILE", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -180,6 +197,8 @@ func TestStoreKeyFile_PathError(t *testing.T) {
 	}
 }
 
+// TestLoadKeyFile_PathError verifies that LoadKeyFile propagates the error when
+// KeyFilePath cannot resolve a source path.
 func TestLoadKeyFile_PathError(t *testing.T) {
 	t.Setenv("ENCLAUDE_KEY_FILE", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -192,6 +211,8 @@ func TestLoadKeyFile_PathError(t *testing.T) {
 	}
 }
 
+// TestDeleteKeyFile_PathError verifies that DeleteKeyFile propagates the error
+// when KeyFilePath cannot resolve a path.
 func TestDeleteKeyFile_PathError(t *testing.T) {
 	t.Setenv("ENCLAUDE_KEY_FILE", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -204,6 +225,8 @@ func TestDeleteKeyFile_PathError(t *testing.T) {
 	}
 }
 
+// TestStoreKeyFile_DirCreationError verifies that StoreKeyFile fails when the
+// parent directory cannot be created because a regular file occupies its path.
 func TestStoreKeyFile_DirCreationError(t *testing.T) {
 	// Create a file where a directory should be to force MkdirAll to fail
 	dir := t.TempDir()
@@ -222,6 +245,8 @@ func TestStoreKeyFile_DirCreationError(t *testing.T) {
 	}
 }
 
+// TestStoreKeyFile_WriteError verifies that StoreKeyFile fails when the key
+// file cannot be written because a directory already occupies its path.
 func TestStoreKeyFile_WriteError(t *testing.T) {
 	// Create a directory where the file should be to force WriteFile to fail
 	dir := t.TempDir()
@@ -243,6 +268,8 @@ func TestStoreKeyFile_WriteError(t *testing.T) {
 // (scrypt failure usually requires very large parameters or missing random data, which we don't control here).
 // 92.3% for StoreKeyFile and 100% for the rest is excellent coverage.
 
+// TestLoadKeyFile_ReadError verifies that LoadKeyFile fails when the key file
+// cannot be read because a directory occupies its path.
 func TestLoadKeyFile_ReadError(t *testing.T) {
 	// Create a directory where the file should be to force ReadFile to fail
 	dir := t.TempDir()
@@ -258,6 +285,9 @@ func TestLoadKeyFile_ReadError(t *testing.T) {
 	}
 }
 
+// TestDeleteKeyFile_RemoveError is a placeholder documenting that the os.Remove
+// failure path of DeleteKeyFile is not exercised here, since it cannot be
+// triggered cross-platform without mocking os.Remove.
 func TestDeleteKeyFile_RemoveError(t *testing.T) {
 	// Not practically testable cleanly in a cross-platform way without mocking os.Remove,
 	// but we already have 100% on DeleteKeyFile and LoadKeyFile.
