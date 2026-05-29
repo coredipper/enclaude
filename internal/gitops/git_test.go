@@ -264,3 +264,126 @@ func TestConfigMergeDriverQuoting(t *testing.T) {
 		t.Errorf("expected git special tokens to remain unquoted, got %s", out)
 	}
 }
+
+// TestMerge covers Merge and MergeAbort: a clean fast-forward-style merge
+// applies the branch's changes to the working tree, while a conflicting
+// merge fails with a CONFLICT message and MergeAbort restores the pre-merge
+// file state.
+func TestMerge(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	g := New(tmpDir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Configure git for CI environments where user is not set
+	if _, err := g.run("config", "user.name", "Test User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	f := filepath.Join(tmpDir, "file.txt")
+	if err := os.WriteFile(f, []byte("initial\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := g.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Commit("initial commit"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make sure we are on 'main' branch
+	if _, err := g.run("branch", "-M", "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("Clean merge", func(t *testing.T) {
+		if _, err := g.run("checkout", "-b", "feature-clean"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f, []byte("initial\nclean-update\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.AddAll(); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.Commit("clean update"); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := g.run("checkout", "main"); err != nil {
+			t.Fatal(err)
+		}
+
+		out, err := g.Merge("feature-clean")
+		if err != nil {
+			t.Fatalf("expected successful merge, got err: %v, out: %s", err, out)
+		}
+
+		content, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(content) != "initial\nclean-update\n" {
+			t.Fatalf("unexpected content after clean merge: %s", string(content))
+		}
+	})
+
+	t.Run("Merge conflict and abort", func(t *testing.T) {
+		// We are currently on 'main'
+		if _, err := g.run("checkout", "-b", "feature-conflict"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f, []byte("initial\nclean-update\nfeature-conflict-update\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.AddAll(); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.Commit("feature conflict update"); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := g.run("checkout", "main"); err != nil {
+			t.Fatal(err)
+		}
+
+		// Make a conflicting change on main
+		if err := os.WriteFile(f, []byte("initial\nclean-update\nmain-conflict-update\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.AddAll(); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.Commit("main conflict update"); err != nil {
+			t.Fatal(err)
+		}
+
+		out, err := g.Merge("feature-conflict")
+		if err == nil {
+			t.Fatalf("expected merge conflict error, got nil")
+		}
+		if !strings.Contains(out, "CONFLICT") {
+			t.Errorf("expected conflict message in output, got: %s", out)
+		}
+
+		// Now abort the merge
+		if err := g.MergeAbort(); err != nil {
+			t.Fatalf("expected successful merge abort, got err: %v", err)
+		}
+
+		// Verify file state is back to pre-merge main state
+		content, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(content) != "initial\nclean-update\nmain-conflict-update\n" {
+			t.Fatalf("unexpected content after merge abort: %s", string(content))
+		}
+	})
+}
