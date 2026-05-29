@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+// TestShredFile_Small verifies that ShredFile overwrites and removes a small
+// file, leaving no file behind.
 func TestShredFile_Small(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "small.txt")
@@ -25,6 +27,8 @@ func TestShredFile_Small(t *testing.T) {
 	}
 }
 
+// TestShredFile_NonExistent verifies that ShredFile returns an error when the
+// target path does not exist (the initial stat fails).
 func TestShredFile_NonExistent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nonexistent.txt")
@@ -35,6 +39,8 @@ func TestShredFile_NonExistent(t *testing.T) {
 	}
 }
 
+// TestShredFile_ReadOnly verifies that ShredFile returns an error when the file
+// cannot be opened for writing because its mode is read-only.
 func TestShredFile_ReadOnly(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "readonly.txt")
@@ -50,6 +56,9 @@ func TestShredFile_ReadOnly(t *testing.T) {
 	}
 }
 
+// TestShredFile_Undeletable verifies that when the final os.Remove fails
+// (parent directory is read-only), ShredFile still returns an error yet has
+// already overwritten the file contents with random data.
 func TestShredFile_Undeletable(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "undeletable.txt")
@@ -88,6 +97,8 @@ func TestShredFile_Undeletable(t *testing.T) {
 	}
 }
 
+// TestShredFile_Large exercises the chunked overwrite path with a file larger
+// than the 64KB buffer and verifies it is fully removed afterward.
 func TestShredFile_Large(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "large.txt")
