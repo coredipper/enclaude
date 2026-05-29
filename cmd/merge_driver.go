@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/merge"
@@ -115,102 +116,12 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 			continue
 		}
 
-		// Different content — resolve merge strategy from config.
-		resolvedStrategy, winningPattern := sealstore.ResolveMergeStrategyWithPattern(path, cfg.Merge)
-		strategy := merge.Strategy(resolvedStrategy)
-		if strategy == "" {
-			strategy = merge.LastWriteWins
-		}
-		// Fail-safe: sessions-index.json is a JSON object, not JSONL.
-		// jsonl_dedup is structurally incompatible and would produce corrupt
-		// data regardless of which config rule resolved it.
-		if strategy == merge.JSONLDedup && filepath.Base(path) == "sessions-index.json" {
-			return fmt.Errorf("refusing to merge %s with jsonl_dedup (sessions-index.json is JSON, not JSONL; rule %q matched). Fix: change the strategy to 'sessions_index' in seal.toml, or run 'enclaude upgrade'", path, winningPattern)
-		}
-
-		// For immutable files, both sides should have the same hash.
-		// If not, prefer ours (shouldn't happen for completed sessions).
-		if strategy == merge.Immutable {
-			merged.Files[path] = oursEntry
-			emitMergeEvent(string(strategy), path, nil)
-			continue
-		}
-
-		// For strategies that need content, decrypt both versions
-		oursEncrypted, err := objStore.Read(oursEntry.ContentHash)
+		// Different content - resolve conflict
+		resolvedEntry, err := resolveFileConflict(path, oursEntry, theirsEntry, ancestor, cfg, identity, objStore)
 		if err != nil {
-			merged.Files[path] = oursEntry
-			continue
+			return err
 		}
-		theirsEncrypted, err := objStore.Read(theirsEntry.ContentHash)
-		if err != nil {
-			merged.Files[path] = oursEntry
-			continue
-		}
-
-		oursPlain, err := crypto.Decrypt(oursEncrypted, identity)
-		if err != nil {
-			merged.Files[path] = oursEntry
-			continue
-		}
-		theirsPlain, err := crypto.Decrypt(theirsEncrypted, identity)
-		if err != nil {
-			merged.Files[path] = oursEntry
-			continue
-		}
-
-		// Get ancestor content if available
-		var ancestorPlain []byte
-		if ancestorEntry, ok := ancestor.Files[path]; ok {
-			if ancestorEnc, err := objStore.Read(ancestorEntry.ContentHash); err == nil {
-				ancestorPlain, _ = crypto.Decrypt(ancestorEnc, identity)
-			}
-		}
-
-		oursMtime, _ := time.Parse(time.RFC3339, oursEntry.Mtime)
-		theirsMtime, _ := time.Parse(time.RFC3339, theirsEntry.Mtime)
-
-		mergedContent, err := merge.Merge(
-			strategy,
-			ancestorPlain, oursPlain, theirsPlain,
-			merge.FileMeta{Mtime: oursMtime},
-			merge.FileMeta{Mtime: theirsMtime},
-		)
-		if err != nil {
-			// On error, prefer ours
-			merged.Files[path] = oursEntry
-			continue
-		}
-
-		// Encrypt merged content and store
-		mergedHash := sealstore.ContentHash(mergedContent)
-		mergedEncrypted, err := crypto.Encrypt(mergedContent, identity.Recipient())
-		if err != nil {
-			merged.Files[path] = oursEntry
-			continue
-		}
-
-		if err := objStore.Write(mergedHash, mergedEncrypted); err != nil {
-			merged.Files[path] = oursEntry
-			continue
-		}
-
-		mergedLineCount := countLines(mergedContent)
-		merged.Files[path] = sealstore.FileEntry{
-			ContentHash:    mergedHash,
-			SizePlaintext:  int64(len(mergedContent)),
-			SizeEncrypted:  int64(len(mergedEncrypted)),
-			Mtime:          time.Now().UTC().Format(time.RFC3339),
-			MergeStrategy:  string(strategy),
-			JSONLLineCount: mergedLineCount,
-		}
-
-		event := mergeEvent(string(strategy), mergedLineCount, mergedContent, oursPlain, theirsPlain)
-		emitMergeEvent(string(strategy), path, event)
-
-		if flagVerbose {
-			fmt.Fprintf(os.Stderr, "  [merge:%s] %s\n", strategy, path)
-		}
+		merged.Files[path] = resolvedEntry
 	}
 
 	// Write merged manifest back to "ours" file (git convention)
@@ -288,6 +199,109 @@ func sessionsIndexEntryCount(data []byte) int {
 		return 0
 	}
 	return len(obj.Entries)
+}
+
+// resolveFileConflict determines the appropriate merge strategy for a single file,
+// decrypts the conflicting versions, performs the merge, re-encrypts the result,
+// and saves it to the object store.
+func resolveFileConflict(
+	path string,
+	oursEntry, theirsEntry sealstore.FileEntry,
+	ancestor sealstore.Manifest,
+	cfg *config.Config,
+	identity *age.X25519Identity,
+	objStore *sealstore.ObjectStore,
+) (sealstore.FileEntry, error) {
+	// Different content — resolve merge strategy from config.
+	resolvedStrategy, winningPattern := sealstore.ResolveMergeStrategyWithPattern(path, cfg.Merge)
+	strategy := merge.Strategy(resolvedStrategy)
+	if strategy == "" {
+		strategy = merge.LastWriteWins
+	}
+	// Fail-safe: sessions-index.json is a JSON object, not JSONL.
+	// jsonl_dedup is structurally incompatible and would produce corrupt
+	// data regardless of which config rule resolved it.
+	if strategy == merge.JSONLDedup && filepath.Base(path) == "sessions-index.json" {
+		return sealstore.FileEntry{}, fmt.Errorf("refusing to merge %s with jsonl_dedup (sessions-index.json is JSON, not JSONL; rule %q matched). Fix: change the strategy to 'sessions_index' in seal.toml, or run 'enclaude upgrade'", path, winningPattern)
+	}
+
+	// For immutable files, both sides should have the same hash.
+	// If not, prefer ours (shouldn't happen for completed sessions).
+	if strategy == merge.Immutable {
+		emitMergeEvent(string(strategy), path, nil)
+		return oursEntry, nil
+	}
+
+	// For strategies that need content, decrypt both versions
+	oursEncrypted, err := objStore.Read(oursEntry.ContentHash)
+	if err != nil {
+		return oursEntry, nil
+	}
+	theirsEncrypted, err := objStore.Read(theirsEntry.ContentHash)
+	if err != nil {
+		return oursEntry, nil
+	}
+
+	oursPlain, err := crypto.Decrypt(oursEncrypted, identity)
+	if err != nil {
+		return oursEntry, nil
+	}
+	theirsPlain, err := crypto.Decrypt(theirsEncrypted, identity)
+	if err != nil {
+		return oursEntry, nil
+	}
+
+	// Get ancestor content if available
+	var ancestorPlain []byte
+	if ancestorEntry, ok := ancestor.Files[path]; ok {
+		if ancestorEnc, err := objStore.Read(ancestorEntry.ContentHash); err == nil {
+			ancestorPlain, _ = crypto.Decrypt(ancestorEnc, identity)
+		}
+	}
+
+	oursMtime, _ := time.Parse(time.RFC3339, oursEntry.Mtime)
+	theirsMtime, _ := time.Parse(time.RFC3339, theirsEntry.Mtime)
+
+	mergedContent, err := merge.Merge(
+		strategy,
+		ancestorPlain, oursPlain, theirsPlain,
+		merge.FileMeta{Mtime: oursMtime},
+		merge.FileMeta{Mtime: theirsMtime},
+	)
+	if err != nil {
+		// On error, prefer ours
+		return oursEntry, nil
+	}
+
+	// Encrypt merged content and store
+	mergedHash := sealstore.ContentHash(mergedContent)
+	mergedEncrypted, err := crypto.Encrypt(mergedContent, identity.Recipient())
+	if err != nil {
+		return oursEntry, nil
+	}
+
+	if err := objStore.Write(mergedHash, mergedEncrypted); err != nil {
+		return oursEntry, nil
+	}
+
+	mergedLineCount := countLines(mergedContent)
+	resolved := sealstore.FileEntry{
+		ContentHash:    mergedHash,
+		SizePlaintext:  int64(len(mergedContent)),
+		SizeEncrypted:  int64(len(mergedEncrypted)),
+		Mtime:          time.Now().UTC().Format(time.RFC3339),
+		MergeStrategy:  string(strategy),
+		JSONLLineCount: mergedLineCount,
+	}
+
+	event := mergeEvent(string(strategy), mergedLineCount, mergedContent, oursPlain, theirsPlain)
+	emitMergeEvent(string(strategy), path, event)
+
+	if flagVerbose {
+		fmt.Fprintf(os.Stderr, "  [merge:%s] %s\n", strategy, path)
+	}
+
+	return resolved, nil
 }
 
 // emitMergeEvent writes a single structured `[enclaude-merge]` line to
