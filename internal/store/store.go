@@ -654,9 +654,6 @@ func ResolveMergeStrategyWithPattern(relPath string, strategies map[string]strin
 	bestScore := ""
 
 	for p, s := range strategies {
-		if p == relPath {
-			continue // already checked exact match
-		}
 		if MatchGlob(relPath, p) {
 			score := patternSpecificity(p)
 			if score > bestScore {
