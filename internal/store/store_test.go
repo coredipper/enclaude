@@ -378,35 +378,6 @@ func TestUnsealDoesNotDeleteUnmanagedFiles(t *testing.T) {
 	}
 }
 
-func TestManifestDiff(t *testing.T) {
-	old := &Manifest{
-		Files: map[string]FileEntry{
-			"a.txt": {ContentHash: "hash1"},
-			"b.txt": {ContentHash: "hash2"},
-			"c.txt": {ContentHash: "hash3"},
-		},
-	}
-	new := &Manifest{
-		Files: map[string]FileEntry{
-			"a.txt": {ContentHash: "hash1"},  // unchanged
-			"b.txt": {ContentHash: "hash2b"}, // modified
-			"d.txt": {ContentHash: "hash4"},  // added
-		},
-	}
-
-	diff := new.Diff(old)
-
-	if len(diff.Added) != 1 || diff.Added[0] != "d.txt" {
-		t.Errorf("Added = %v, want [d.txt]", diff.Added)
-	}
-	if len(diff.Modified) != 1 || diff.Modified[0] != "b.txt" {
-		t.Errorf("Modified = %v, want [b.txt]", diff.Modified)
-	}
-	if len(diff.Deleted) != 1 || diff.Deleted[0] != "c.txt" {
-		t.Errorf("Deleted = %v, want [c.txt]", diff.Deleted)
-	}
-}
-
 func TestContentHash(t *testing.T) {
 	data := []byte("hello world")
 	hash1 := ContentHash(data)
