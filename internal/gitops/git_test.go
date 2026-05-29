@@ -265,6 +265,10 @@ func TestConfigMergeDriverQuoting(t *testing.T) {
 	}
 }
 
+// TestMerge covers Merge and MergeAbort: a clean fast-forward-style merge
+// applies the branch's changes to the working tree, while a conflicting
+// merge fails with a CONFLICT message and MergeAbort restores the pre-merge
+// file state.
 func TestMerge(t *testing.T) {
 	tmpDir := t.TempDir()
 
