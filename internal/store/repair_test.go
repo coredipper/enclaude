@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -464,5 +465,140 @@ func TestVerifyListObjectsError(t *testing.T) {
 	_, err := Verify(cfg, identity, true)
 	if err == nil {
 		t.Fatal("expected Verify() to fail due to ListAll error, got nil")
+	}
+}
+
+// TestRepairDeletesOrphans verifies Repair removes orphan objects that are
+// not referenced by the manifest.
+func TestRepairDeletesOrphans(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	// Add a fake orphan object
+	store := NewObjectStore(sealDir)
+	fakeHash := "deadbeef12345678deadbeef12345678deadbeef12345678deadbeef12345678"
+	store.Write(fakeHash, []byte("orphan data"))
+
+	// Repair with deleteOrphans=true
+	result, err := Repair(cfg, identity, true, false)
+	if err != nil {
+		t.Fatalf("Repair() error: %v", err)
+	}
+
+	if store.Exists(fakeHash) {
+		t.Errorf("Orphan still exists")
+	}
+
+	if len(result.OrphanObjects) != 1 {
+		t.Errorf("expected 1 orphan in result, got %d", len(result.OrphanObjects))
+	}
+}
+
+// TestRepairSkipsMissingPlaintext verifies Repair cannot fix an entry whose
+// object and source plaintext are both gone, leaving Fixed at 0.
+func TestRepairSkipsMissingPlaintext(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	// Delete an object from the store AND from the plaintext dir
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
+	deletedPath := "history.jsonl"
+	os.Remove(store.ObjectPath(manifest.Files[deletedPath].ContentHash))
+	os.Remove(filepath.Join(claudeDir, deletedPath))
+
+	// Repair should attempt to fix but fail to read plaintext, returning without error but Fixed=0
+	result, err := Repair(cfg, identity, false, false)
+	if err != nil {
+		t.Fatalf("Repair() error: %v", err)
+	}
+
+	if result.Fixed != 0 {
+		t.Errorf("expected 0 fixed, got %d", result.Fixed)
+	}
+}
+
+// TestRepairFailsWithCorruptManifest verifies Repair propagates an error
+// when the manifest cannot be loaded.
+func TestRepairFailsWithCorruptManifest(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	// Corrupt manifest
+	os.WriteFile(filepath.Join(sealDir, "manifest.json"), []byte("{invalid json"), 0644)
+
+	_, err := Repair(cfg, identity, false, false)
+	if err == nil {
+		t.Fatalf("expected error from Repair with corrupt manifest")
+	}
+}
+
+// TestRepairFixesCorruptObject verifies Repair re-seals a corrupted object
+// from its plaintext so the restored content matches the original.
+func TestRepairFixesCorruptObject(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	Seal(cfg, identity.Recipient(), false, nil)
+
+	// Corrupt an object
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
+	corruptedPath := "history.jsonl"
+	hash := manifest.Files[corruptedPath].ContentHash
+
+	// Write wrong content to the object file
+	store.Write(hash, []byte("corrupt data"))
+
+	// Repair should fix it using the available plaintext
+	result, err := Repair(cfg, identity, false, false)
+	if err != nil {
+		t.Fatalf("Repair() error: %v", err)
+	}
+
+	if result.Fixed != 1 {
+		t.Errorf("expected 1 fixed, got %d", result.Fixed)
+	}
+
+	// Verify the object is properly restored
+	manifest2, _ := LoadManifest(sealDir)
+	entry := manifest2.Files[corruptedPath]
+
+	// Since the plaintext hasn't changed, the hash should be the original one
+	// But let's verify we can decrypt it and get original content
+	encrypted, err := store.Read(entry.ContentHash)
+	if err != nil {
+		t.Fatalf("Failed to read repaired object: %v", err)
+	}
+
+	plaintext, err := crypto.Decrypt(encrypted, identity)
+	if err != nil {
+		t.Fatalf("Failed to decrypt repaired object: %v", err)
+	}
+
+	originalContent, err := os.ReadFile(filepath.Join(claudeDir, corruptedPath))
+	if err != nil {
+		t.Fatalf("Failed to read original plaintext: %v", err)
+	}
+	if !bytes.Equal(plaintext, originalContent) {
+		t.Errorf("Repaired content does not match original plaintext")
 	}
 }
