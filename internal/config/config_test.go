@@ -114,6 +114,10 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+// TestDefaultConfig verifies DefaultConfig wires the given Claude and seal
+// dirs, sets a non-empty DeviceID and the current ConfigVersion, applies the
+// expected auto-seal/unseal defaults (push/pull off), and ships the full set
+// of include, exclude, and per-path merge-strategy defaults.
 func TestDefaultConfig(t *testing.T) {
 	claudeDir := "/mock/claude"
 	sealDir := "/mock/seal"
