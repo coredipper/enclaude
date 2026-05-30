@@ -1,7 +1,6 @@
 package merge
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -19,18 +18,9 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 	var entries []jsonlEntry
 
 	for _, data := range [][]byte{ours, theirs} {
-		for len(data) > 0 {
-			var lineBytes []byte
-			idx := bytes.IndexByte(data, '\n')
-			if idx >= 0 {
-				lineBytes = data[:idx]
-				data = data[idx+1:]
-			} else {
-				lineBytes = data
-				data = nil
-			}
-
-			line := strings.TrimSpace(string(lineBytes))
+		lines := splitLines(string(data))
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
 			if line == "" {
 				continue
 			}
@@ -125,6 +115,10 @@ func MergeSessionsIndex(ours, theirs []byte) ([]byte, error) {
 type jsonlEntry struct {
 	line      string
 	timestamp float64
+}
+
+func splitLines(s string) []string {
+	return strings.Split(s, "\n")
 }
 
 // parseJSONLine parses a JSON line once to extract both a normalized hash
