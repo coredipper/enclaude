@@ -2,6 +2,7 @@ package merge
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -76,6 +77,28 @@ func TestMergeJSONLEmptyInputs(t *testing.T) {
 	lines := nonEmptyLines(string(merged))
 	if len(lines) != 1 {
 		t.Fatalf("expected 1 line, got %d", len(lines))
+	}
+}
+
+// TestMergeJSONLNoTrailingNewline exercises the final-line branch of the
+// in-place byte walk, where the input does not end in a newline. Every other
+// fixture is newline-terminated, so this is the one MergeJSONL path the suite
+// would not otherwise reach; the unterminated last record must still be
+// emitted and deduplicated rather than dropped.
+func TestMergeJSONLNoTrailingNewline(t *testing.T) {
+	// ours ends mid-line (no trailing newline); theirs is a single
+	// unterminated line duplicating ours' last record.
+	ours := []byte(`{"display":"a","timestamp":1000}` + "\n" + `{"display":"b","timestamp":2000}`)
+	theirs := []byte(`{"display":"b","timestamp":2000}`)
+
+	merged, err := MergeJSONL(ours, theirs)
+	if err != nil {
+		t.Fatalf("MergeJSONL() error: %v", err)
+	}
+
+	lines := nonEmptyLines(string(merged))
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 deduped lines, got %d: %s", len(lines), string(merged))
 	}
 }
 
@@ -352,6 +375,32 @@ func BenchmarkMergeJSONL(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, err := MergeJSONL(ours, theirs)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkMergeJSONLLarge measures MergeJSONL on many-line inputs, where the
+// line-splitting strategy's allocation profile actually shows up — the
+// per-line string copy vs. the upfront []string from strings.Split. The
+// handful of lines in BenchmarkMergeJSONL above keeps that difference in the
+// noise; this case makes it measurable so either direction is caught.
+func BenchmarkMergeJSONLLarge(b *testing.B) {
+	const n = 5000
+	var ours, theirs strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&ours, "{\"event\":\"e%d\",\"timestamp\":%d,\"data\":\"payload %d\"}\n", i, i, i)
+		// theirs overlaps the back half of ours and adds a fresh tail, so the
+		// merge does real cross-side dedup work rather than trivially copying.
+		fmt.Fprintf(&theirs, "{\"event\":\"e%d\",\"timestamp\":%d,\"data\":\"payload %d\"}\n", i+n/2, i+n/2, i+n/2)
+	}
+	oursBytes := []byte(ours.String())
+	theirsBytes := []byte(theirs.String())
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := MergeJSONL(oursBytes, theirsBytes)
 		if err != nil {
 			b.Fatal(err)
 		}
