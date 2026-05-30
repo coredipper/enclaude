@@ -80,11 +80,10 @@ func TestMergeJSONLEmptyInputs(t *testing.T) {
 	}
 }
 
-// TestMergeJSONLNoTrailingNewline exercises the final-line branch of the
-// in-place byte walk, where the input does not end in a newline. Every other
-// fixture is newline-terminated, so this is the one MergeJSONL path the suite
-// would not otherwise reach; the unterminated last record must still be
-// emitted and deduplicated rather than dropped.
+// TestMergeJSONLNoTrailingNewline verifies that a final JSONL record with no
+// trailing newline is still parsed, emitted, and deduplicated rather than
+// dropped. Every other fixture is newline-terminated, so this is the only test
+// exercising that input boundary.
 func TestMergeJSONLNoTrailingNewline(t *testing.T) {
 	// ours ends mid-line (no trailing newline); theirs is a single
 	// unterminated line duplicating ours' last record.
@@ -414,11 +413,10 @@ func BenchmarkMergeJSONL(b *testing.B) {
 	}
 }
 
-// BenchmarkMergeJSONLLarge measures MergeJSONL on many-line inputs, where the
-// line-splitting strategy's allocation profile actually shows up — the
-// per-line string copy vs. the upfront []string from strings.Split. The
-// handful of lines in BenchmarkMergeJSONL above keeps that difference in the
-// noise; this case makes it measurable so either direction is caught.
+// BenchmarkMergeJSONLLarge measures MergeJSONL on many-line inputs. The
+// handful of lines in BenchmarkMergeJSONL above is too small for allocation or
+// throughput shifts in the merge path to rise above the noise; this case makes
+// them measurable so a regression in either direction is caught.
 func BenchmarkMergeJSONLLarge(b *testing.B) {
 	const n = 5000
 	var ours, theirs strings.Builder
