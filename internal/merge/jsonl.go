@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,9 +19,18 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 	var entries []jsonlEntry
 
 	for _, data := range [][]byte{ours, theirs} {
-		lines := splitLines(string(data))
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
+		for len(data) > 0 {
+			var lineBytes []byte
+			idx := bytes.IndexByte(data, '\n')
+			if idx >= 0 {
+				lineBytes = data[:idx]
+				data = data[idx+1:]
+			} else {
+				lineBytes = data
+				data = nil
+			}
+
+			line := strings.TrimSpace(string(lineBytes))
 			if line == "" {
 				continue
 			}
@@ -75,7 +85,7 @@ func MergeSessionsIndex(ours, theirs []byte) ([]byte, error) {
 
 	for _, entries := range [][]json.RawMessage{oursEntries, theirsEntries} {
 		for _, entry := range entries {
-			sid := extractField(entry, "sessionId")
+			sid := extractSessionId(entry)
 			if sid == "" {
 				sid = string(entry) // fallback: use full content as key
 			}
@@ -117,10 +127,6 @@ type jsonlEntry struct {
 	timestamp float64
 }
 
-func splitLines(s string) []string {
-	return strings.Split(s, "\n")
-}
-
 // parseJSONLine parses a JSON line once to extract both a normalized hash
 // and a timestamp, avoiding duplicate unmarshaling overhead.
 func parseJSONLine(line string) (string, float64) {
@@ -154,13 +160,12 @@ func parseJSONLine(line string) (string, float64) {
 	return hex.EncodeToString(h[:]), ts
 }
 
-func extractField(raw json.RawMessage, field string) string {
-	var obj map[string]interface{}
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return ""
+func extractSessionId(raw json.RawMessage) string {
+	var obj struct {
+		SessionID string `json:"sessionId"`
 	}
-	if v, ok := obj[field].(string); ok {
-		return v
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		return obj.SessionID
 	}
 	return ""
 }
