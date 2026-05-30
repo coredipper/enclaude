@@ -337,10 +337,6 @@ func TestMergeSessionsIndexDeduplicatesOnSessionId(t *testing.T) {
 	}
 }
 
-// TestSplitLines verifies that splitLines wraps strings.Split appropriately
-// and produces the expected raw slices including trailing empty strings
-// for inputs with trailing newlines.
-
 // BenchmarkMergeJSONL measures MergeJSONL throughput on two JSONL inputs that
 // share overlapping lines requiring deduplication.
 func BenchmarkMergeJSONL(b *testing.B) {
