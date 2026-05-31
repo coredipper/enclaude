@@ -156,9 +156,17 @@ func MatchGlob(path, pattern string) bool {
 	return matchSegmentsPatRem(path, true, pattern, true)
 }
 
-// matchSegmentsPatRem matches the remaining path segments against pattern segments.
-// Handles ** as "zero or more directory levels".
-// `morePath` and `morePat` track whether unconsumed segments remain.
+// matchSegmentsPatRem matches the remaining path segments against the remaining
+// pattern segments, handling ** as "zero or more directory levels". It walks
+// both strings with strings.IndexByte instead of strings.Split to avoid slice
+// allocations.
+//
+// morePath/morePat must reproduce strings.Split semantics exactly: Split never
+// yields zero segments, so "" is one empty segment and a trailing slash
+// ("a/b/") leaves a trailing empty one. Each bool means "a segment is still
+// unconsumed" — true even when that segment is empty — keeping the empty tail
+// distinct from exhaustion (!more). Collapsing the two would flip matches for
+// the empty path and for the scanner's rel+"/" directory probes.
 func matchSegmentsPatRem(path string, morePath bool, pattern string, morePat bool) bool {
 	for morePat {
 		var pat string
