@@ -244,6 +244,14 @@ func TestMatchGlob_DifferentialAgainstOldSplit(t *testing.T) {
 		"**/**",
 		"*",
 		"a",
+		// Pattern-side trailing-empty / empty cases: the matcher slices the
+		// pattern on the fly, so these pin that it reproduces strings.Split's
+		// trailing-empty ("a/" -> ["a",""]) and empty-input ("" -> [""])
+		// segments rather than collapsing them.
+		"a/**/",
+		"**/",
+		"statsig/**/",
+		"",
 	}
 
 	for _, p := range paths {

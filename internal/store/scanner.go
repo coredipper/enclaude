@@ -110,11 +110,11 @@ func fastRel(base, path string) (string, error) {
 }
 
 // compiledPattern holds a pre-processed glob pattern to avoid repeatedly
-// checking for double-stars and splitting the pattern string.
+// checking for double-stars. We no longer split the pattern ahead of time
+// since matchSegmentsPatRem avoids allocations by splitting on the fly.
 type compiledPattern struct {
 	raw           string
 	hasDoubleStar bool
-	segs          []string
 }
 
 func compilePatterns(patterns []string) []compiledPattern {
@@ -123,9 +123,6 @@ func compilePatterns(patterns []string) []compiledPattern {
 		res[i] = compiledPattern{
 			raw:           p,
 			hasDoubleStar: strings.Contains(p, "**"),
-		}
-		if res[i].hasDoubleStar {
-			res[i].segs = strings.Split(p, "/")
 		}
 	}
 	return res
@@ -140,7 +137,7 @@ func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
 				return true
 			}
 		} else {
-			if matchSegments(relPath, p.segs) {
+			if matchSegmentsPatRem(relPath, true, p.raw, true) {
 				return true
 			}
 		}
@@ -149,85 +146,78 @@ func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
 }
 
 // MatchGlob matches a path against a glob pattern with ** support.
-// It splits the pattern into segments and matches segment-by-segment against the path string.
+// It avoids strings.Split on both path and pattern strings to eliminate slice allocations.
 func MatchGlob(path, pattern string) bool {
 	if !strings.Contains(pattern, "**") {
 		matched, _ := filepath.Match(pattern, path)
 		return matched
 	}
 
-	patSegs := strings.Split(pattern, "/")
-	return matchSegments(path, patSegs)
+	return matchSegmentsPatRem(path, true, pattern, true)
 }
 
-// matchSegments recursively matches a path string against pattern segments.
-// Handles ** as "zero or more directory levels".
+// matchSegmentsPatRem matches the remaining path segments against the remaining
+// pattern segments, handling ** as "zero or more directory levels". It walks
+// both strings with strings.IndexByte instead of strings.Split to avoid slice
+// allocations.
 //
-// It must reproduce strings.Split(path, "/") semantics exactly: every path
-// has segment count strings.Count(path, "/")+1, so "" is one (empty) segment
-// and a trailing slash ("a/b/") yields a trailing empty segment ["a","b",""].
-// Collapsing those into "no segments" would flip matches for trailing-slash
-// directory probes (the scanner passes rel+"/") and for the empty path.
-//
-// We track the remaining segments as (path, more): `more` is true whenever at
-// least one segment is still unconsumed, so the empty-segment tail survives
-// instead of being conflated with exhaustion. We avoid strings.Split on the
-// path to eliminate slice allocations.
-func matchSegments(path string, patSegs []string) bool {
-	return matchSegmentsRem(path, true, patSegs)
-}
-
-// matchSegmentsRem matches the remaining path segments — the comma-free runs of
-// path joined by '/', with `more` indicating an unconsumed segment is present —
-// against patSegs. Exhaustion is `!more`, distinct from an empty current
-// segment, which mirrors strings.Split's trailing-empty and empty-path cases.
-func matchSegmentsRem(path string, more bool, patSegs []string) bool {
-	for len(patSegs) > 0 {
-		pat := patSegs[0]
+// morePath/morePat must reproduce strings.Split semantics exactly: Split never
+// yields zero segments, so "" is one empty segment and a trailing slash
+// ("a/b/") leaves a trailing empty one. Each bool means "a segment is still
+// unconsumed" — true even when that segment is empty — keeping the empty tail
+// distinct from exhaustion (!more). Collapsing the two would flip matches for
+// the empty path and for the scanner's rel+"/" directory probes.
+func matchSegmentsPatRem(path string, morePath bool, pattern string, morePat bool) bool {
+	for morePat {
+		var pat string
+		idx := strings.IndexByte(pattern, '/')
+		if idx == -1 {
+			pat = pattern
+			pattern, morePat = "", false
+		} else {
+			pat = pattern[:idx]
+			pattern = pattern[idx+1:]
+		}
 
 		if pat == "**" {
 			// ** matches zero or more path segments
-			patSegs = patSegs[1:]
-
-			// If ** is the last pattern segment, match everything remaining
-			if len(patSegs) == 0 {
+			if !morePat {
 				return true
 			}
 
-			// Try matching the rest of the pattern at every segment position,
-			// including the position past the final segment (where !more).
-			remPath, remMore := path, more
+			// Try matching the rest of the pattern at every segment position
+			remPath, remMore := path, morePath
 			for {
-				if matchSegmentsRem(remPath, remMore, patSegs) {
+				if matchSegmentsPatRem(remPath, remMore, pattern, morePat) {
 					return true
 				}
 				if !remMore {
 					break
 				}
-				idx := strings.IndexByte(remPath, '/')
-				if idx == -1 {
+				idxPath := strings.IndexByte(remPath, '/')
+				if idxPath == -1 {
 					remPath, remMore = "", false
 				} else {
-					remPath = remPath[idx+1:]
+					remPath = remPath[idxPath+1:]
 				}
 			}
 			return false
 		}
 
 		// No more path segments but pattern still has non-** segments
-		if !more {
+		if !morePath {
 			return false
 		}
 
 		// Get current segment
 		var currentSegment string
-		idx := strings.IndexByte(path, '/')
-		if idx == -1 {
+		idxPath := strings.IndexByte(path, '/')
+		if idxPath == -1 {
 			currentSegment = path
-			path, more = "", false // Last segment consumed
+			path, morePath = "", false // Last segment consumed
 		} else {
-			currentSegment = path[:idx]
-			path = path[idx+1:] // Move past '/'; at least the tail remains
+			currentSegment = path[:idxPath]
+			path = path[idxPath+1:] // Move past '/'; at least the tail remains
 		}
 
 		// Match current segment with filepath.Match (handles * and ? within a segment)
@@ -235,10 +225,8 @@ func matchSegmentsRem(path string, more bool, patSegs []string) bool {
 		if !matched {
 			return false
 		}
-
-		patSegs = patSegs[1:]
 	}
 
 	// Pattern exhausted — path must also be exhausted
-	return !more
+	return !morePath
 }
