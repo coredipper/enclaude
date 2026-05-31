@@ -75,7 +75,7 @@ func MergeSessionsIndex(ours, theirs []byte) ([]byte, error) {
 
 	for _, entries := range [][]json.RawMessage{oursEntries, theirsEntries} {
 		for _, entry := range entries {
-			sid := extractField(entry, "sessionId")
+			sid := extractSessionId(entry)
 			if sid == "" {
 				sid = string(entry) // fallback: use full content as key
 			}
@@ -154,13 +154,12 @@ func parseJSONLine(line string) (string, float64) {
 	return hex.EncodeToString(h[:]), ts
 }
 
-func extractField(raw json.RawMessage, field string) string {
-	var obj map[string]interface{}
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return ""
+func extractSessionId(raw json.RawMessage) string {
+	var obj struct {
+		SessionID string `json:"sessionId"`
 	}
-	if v, ok := obj[field].(string); ok {
-		return v
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		return obj.SessionID
 	}
 	return ""
 }
