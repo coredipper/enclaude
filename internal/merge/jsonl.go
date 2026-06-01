@@ -124,7 +124,7 @@ func splitLines(s string) []string {
 // parseJSONLine parses a JSON line once to extract both a normalized hash
 // and a timestamp, avoiding duplicate unmarshaling overhead.
 func parseJSONLine(line string) (string, float64) {
-	var obj map[string]interface{}
+	var obj map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(line), &obj); err != nil {
 		// Not valid JSON — hash the raw line
 		h := sha256.Sum256([]byte(line))
@@ -133,13 +133,19 @@ func parseJSONLine(line string) (string, float64) {
 
 	// Calculate timestamp
 	var ts float64
-	if tsFloat, ok := obj["timestamp"].(float64); ok {
-		ts = tsFloat
-	} else if tsStr, ok := obj["timestamp"].(string); ok {
-		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-			if t, err := time.Parse(layout, tsStr); err == nil {
-				ts = float64(t.UnixNano())
-				break
+	if tsRaw, ok := obj["timestamp"]; ok {
+		var tsFloat float64
+		if err := json.Unmarshal(tsRaw, &tsFloat); err == nil {
+			ts = tsFloat
+		} else {
+			var tsStr string
+			if err := json.Unmarshal(tsRaw, &tsStr); err == nil {
+				for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+					if t, err := time.Parse(layout, tsStr); err == nil {
+						ts = float64(t.UnixNano())
+						break
+					}
+				}
 			}
 		}
 	}
