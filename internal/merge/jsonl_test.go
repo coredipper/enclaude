@@ -117,6 +117,41 @@ func TestMergeJSONLWhitespaceDifference(t *testing.T) {
 	}
 }
 
+// TestMergeJSONLDeepNormalization guards that semantically identical lines
+// deduplicate even when they differ below the top level — in nested-object key
+// order or numeric formatting. parseJSONLine decodes into map[string]interface{}
+// and re-marshals, which canonicalizes recursively; a decode target that keeps
+// values as raw bytes only sorts top-level keys and would silently treat these
+// as distinct, bloating the merged store with duplicates. TestMergeJSONLWhitespaceDifference
+// only reorders top-level keys, which both forms normalize, so it misses this.
+func TestMergeJSONLDeepNormalization(t *testing.T) {
+	t.Run("nested_object_key_order", func(t *testing.T) {
+		ours := []byte(`{"display":"x","timestamp":1000,"meta":{"a":1,"b":2}}` + "\n")
+		theirs := []byte(`{"display":"x","timestamp":1000,"meta":{"b":2,"a":1}}` + "\n")
+
+		merged, err := MergeJSONL(ours, theirs)
+		if err != nil {
+			t.Fatalf("MergeJSONL() error: %v", err)
+		}
+		if lines := nonEmptyLines(string(merged)); len(lines) != 1 {
+			t.Fatalf("expected 1 line after semantic dedup, got %d: %s", len(lines), string(merged))
+		}
+	})
+
+	t.Run("numeric_formatting", func(t *testing.T) {
+		ours := []byte(`{"display":"x","timestamp":1000,"count":1000}` + "\n")
+		theirs := []byte(`{"display":"x","timestamp":1000,"count":1.0e3}` + "\n")
+
+		merged, err := MergeJSONL(ours, theirs)
+		if err != nil {
+			t.Fatalf("MergeJSONL() error: %v", err)
+		}
+		if lines := nonEmptyLines(string(merged)); len(lines) != 1 {
+			t.Fatalf("expected 1 line after semantic dedup, got %d: %s", len(lines), string(merged))
+		}
+	})
+}
+
 func TestMergeSessionsIndex(t *testing.T) {
 	ours := []byte(`{"entries":[
 		{"sessionId":"aaa","summary":"first"},
