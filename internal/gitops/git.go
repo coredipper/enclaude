@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -89,10 +90,20 @@ func (g *Git) Add(paths ...string) error {
 	return err
 }
 
-// AddAll stages all changes.
+// AddAll stages all changes, then force-stages manifest.json. A user's global
+// gitignore (core.excludesFile) can otherwise silently drop the one file an
+// unseal cannot run without — and the hash-named blobs are useless without the
+// relPath->hash mapping it holds.
 func (g *Git) AddAll() error {
-	_, err := g.run("add", ".")
-	return err
+	if _, err := g.run("add", "."); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(g.dir, "manifest.json")); err == nil {
+		if _, err := g.run("add", "-f", "--", "manifest.json"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Commit creates a commit with the given message.

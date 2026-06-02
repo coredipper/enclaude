@@ -728,3 +728,44 @@ func TestPush(t *testing.T) {
 		t.Errorf("Expected 1 commit, got %d", stats.Commits)
 	}
 }
+
+// TestAddAll_ForceStagesIgnoredManifest guards that AddAll stages manifest.json
+// even when a gitignore rule would exclude it. A user's global core.excludesFile
+// matching e.g. *.json once silently dropped the manifest from the pushed repo,
+// leaving clones with un-decryptable blobs and no relPath->hash mapping (issue #94).
+func TestAddAll_ForceStagesIgnoredManifest(t *testing.T) {
+	dir := t.TempDir()
+	g := New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.name", "Test User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stand in for a hostile global core.excludesFile without touching the
+	// user's real git config: .git/info/exclude has the same precedence.
+	exclude := filepath.Join(dir, ".git", "info", "exclude")
+	if err := os.WriteFile(exclude, []byte("manifest.json\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := g.AddAll(); err != nil {
+		t.Fatalf("AddAll() error: %v", err)
+	}
+
+	out, err := g.run("ls-files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "manifest.json") {
+		t.Errorf("manifest.json was not staged despite ignore rule; git ls-files = %q", out)
+	}
+}

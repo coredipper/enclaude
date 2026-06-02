@@ -369,6 +369,21 @@ func unsealFile(store *ObjectStore, identity age.Identity, entry FileEntry, absP
 	return len(plaintext), nil
 }
 
+// noManifestErr explains a missing manifest. A store with encrypted objects but
+// no manifest.json is almost always a clone whose manifest was excluded by a
+// gitignore on the pushing device — the blobs are unrecoverable without the
+// relPath->hash mapping it holds, so point the user at the fix on that device.
+func noManifestErr(sealDir string) error {
+	if objs, _ := NewObjectStore(sealDir).ListAll(); len(objs) > 0 {
+		return fmt.Errorf("seal store at %s has %d encrypted objects but no manifest.json — "+
+			"it was likely excluded by a gitignore on the device that pushed it.\n"+
+			"On that device run:\n"+
+			"  git -C %s add -f manifest.json && git -C %s commit -m 'track manifest' && enclaude push\n"+
+			"then run `enclaude pull` here.", sealDir, len(objs), sealDir, sealDir)
+	}
+	return fmt.Errorf("no manifest found — is the seal store initialized?")
+}
+
 // Unseal decrypts seal contents back to claudeDir and removes managed
 // files not in the manifest. The manifest is the source of truth.
 func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress ProgressFunc) (stats UnsealStats, err error) {
@@ -383,7 +398,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		return stats, fmt.Errorf("loading manifest: %w", err)
 	}
 	if manifest == nil {
-		return stats, fmt.Errorf("no manifest found — is the seal store initialized?")
+		return stats, noManifestErr(sealDir)
 	}
 
 	stats.Total = len(manifest.Files)
@@ -551,7 +566,7 @@ func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
 		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
 	if manifest == nil {
-		return nil, fmt.Errorf("no manifest found — is the seal store initialized?")
+		return nil, noManifestErr(cfg.Seal.SealDir)
 	}
 
 	// Scan existing files. If claudeDir doesn't exist yet (first-time
@@ -739,7 +754,7 @@ func Verify(cfg *config.Config, identity age.Identity, verbose bool) (*RepairRes
 		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
 	if manifest == nil {
-		return nil, fmt.Errorf("no manifest found")
+		return nil, noManifestErr(sealDir)
 	}
 
 	result.TotalManifest = len(manifest.Files)

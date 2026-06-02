@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/coredipper/enclaude/internal/config"
@@ -290,8 +291,8 @@ func TestVerifyNoManifest(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Verify() to fail when no manifest exists, got nil")
 	}
-	if err.Error() != "no manifest found" {
-		t.Fatalf("expected error 'no manifest found', got: %v", err)
+	if !strings.Contains(err.Error(), "no manifest found") {
+		t.Fatalf("expected error to mention 'no manifest found', got: %v", err)
 	}
 }
 
