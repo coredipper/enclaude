@@ -29,10 +29,7 @@ func runSeal(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	// Override dirs from flags
-	if flagClaudeDir != "" {
-		cfg.Seal.ClaudeDir = flagClaudeDir
-	}
+	cfg.Seal.ClaudeDir = getClaudeDir()
 
 	if flagDryRun {
 		fmt.Println("(dry run — showing what would be sealed)")

@@ -38,9 +38,7 @@ func runRepair(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if flagClaudeDir != "" {
-		cfg.Seal.ClaudeDir = flagClaudeDir
-	}
+	cfg.Seal.ClaudeDir = getClaudeDir()
 
 	identity, _, err := crypto.LoadKey()
 	if err != nil {

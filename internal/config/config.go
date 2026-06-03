@@ -116,6 +116,13 @@ func Load(sealDir string) (*Config, error) {
 		return nil, fmt.Errorf("parsing seal.toml: %w", err)
 	}
 
+	// The store is synced across machines, so the seal_dir baked in by `init`
+	// on another device (with a different home) is stale. The manifest and
+	// objects always live next to the seal.toml we just read, so pin seal_dir
+	// to the load location — otherwise a fresh clone looks for the manifest
+	// under the originating machine's path and reports it missing.
+	cfg.Seal.SealDir = sealDir
+
 	// Overlay default merge strategies for keys not present in the loaded config.
 	defaults := DefaultConfig("", "")
 	if cfg.Merge == nil {

@@ -43,6 +43,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagSealDir, "seal-dir", "", "override ~/.enclaude/ location")
 }
 
+// getClaudeDir resolves the Claude directory for this machine. Commands call
+// it instead of trusting the claude_dir in seal.toml: the store is synced
+// across devices, so that value belongs to whichever machine ran `init` and is
+// wrong everywhere else. --claude-dir still wins when set.
 func getClaudeDir() string {
 	if flagClaudeDir != "" {
 		return flagClaudeDir
