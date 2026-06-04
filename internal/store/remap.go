@@ -161,19 +161,23 @@ func PlanRemap(m *Manifest, dstHomeEnc, originHomeEnc string, overrides map[stri
 			continue
 		}
 
-		// Determine the source home prefix, strongest signal first. Checking the
-		// authoritative dstHomeEnc/originHomeEnc by exact boundary BEFORE the
-		// lossy encodedHomePrefix heuristic is what keeps a local project under a
-		// dashed/dotted username (e.g. /Users/bob-smith) from being misread as
-		// "-Users-bob" and wrongly rewritten — which would then let the delete
-		// pass remove real local files.
+		// Determine the source home prefix, strongest signal first.
+		//
+		// The authoritative origin home (from manifest.OriginHome) is checked
+		// BEFORE the dstHomeEnc "already local" test on purpose: when the local
+		// home is a boundary prefix of the origin home (dst="-Users-bob",
+		// origin="-Users-bob-smith"), a key like "-Users-bob-smith-core" starts
+		// with "-Users-bob-" and would otherwise be mistaken for already-local,
+		// skipping the remap and letting the delete pass remove the real local
+		// "-Users-bob-*" files. Both authoritative checks come before the lossy
+		// encodedHomePrefix heuristic so a dashed/dotted username isn't mis-split.
 		switch {
-		case hasEncodedPrefix(seg, dstHomeEnc):
-			continue // already local
-		case originHomeEnc != "" && hasEncodedPrefix(seg, originHomeEnc):
+		case originHomeEnc != "" && originHomeEnc != dstHomeEnc && hasEncodedPrefix(seg, originHomeEnc):
 			if dst, ok := swapEncodedPrefix(seg, originHomeEnc, dstHomeEnc); ok {
 				plans = append(plans, RemapPlan{SrcKey: seg, DstKey: dst, Accepted: true})
 			}
+		case hasEncodedPrefix(seg, dstHomeEnc):
+			continue // already local
 		default:
 			src := encodedHomePrefix(seg)
 			if src == "" || src == dstHomeEnc {

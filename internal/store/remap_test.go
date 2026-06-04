@@ -130,6 +130,21 @@ func TestPlanRemap_OriginHomeAuthoritative(t *testing.T) {
 	}
 }
 
+// TestPlanRemap_LocalHomeIsPrefixOfOrigin guards the ambiguous case where the
+// local home is a boundary prefix of the authoritative origin home
+// (dst=/Users/bob, origin=/Users/bob-smith). The foreign key
+// -Users-bob-smith-core must remap via the origin home to -Users-bob-core
+// rather than be skipped as "already local" — otherwise unseal restores the
+// foreign key and the delete pass can remove the real local -Users-bob-* files.
+func TestPlanRemap_LocalHomeIsPrefixOfOrigin(t *testing.T) {
+	m := NewManifest("dev")
+	m.Files["projects/-Users-bob-smith-core/a.jsonl"] = FileEntry{ContentHash: "h"}
+	plans := PlanRemap(m, "-Users-bob", "-Users-bob-smith", nil)
+	if len(plans) != 1 || plans[0].DstKey != "-Users-bob-core" {
+		t.Fatalf("expected remap to -Users-bob-core via authoritative origin home, got %+v", plans)
+	}
+}
+
 // TestApplyRemap_EffectiveManifestKeys verifies ApplyRemap returns a new
 // manifest whose accepted-plan keys are rewritten while FileEntry values and
 // untouched keys are preserved.
