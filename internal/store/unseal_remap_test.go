@@ -150,3 +150,27 @@ func TestUnsealStatus_RemapHonest(t *testing.T) {
 		t.Errorf("Added should not list the foreign key %q", foreignRel)
 	}
 }
+
+// TestUnsealStatus_RemapOff verifies dry-run honors the requested mode: with
+// RemapOff the preview lists the verbatim foreign key, matching what a real
+// `unseal --remap=off` would restore.
+func TestUnsealStatus_RemapOff(t *testing.T) {
+	sealDir, _, foreignRel := sealForeignProject(t)
+
+	dstClaude := filepath.Join(t.TempDir(), ".claude")
+	cfg := config.DefaultConfig(dstClaude, sealDir)
+
+	diff, err := UnsealStatus(cfg, WithRemap(RemapOff))
+	if err != nil {
+		t.Fatalf("UnsealStatus: %v", err)
+	}
+	var sawForeign bool
+	for _, p := range diff.Added {
+		if p == foreignRel {
+			sawForeign = true
+		}
+	}
+	if !sawForeign {
+		t.Errorf("RemapOff dry-run should preview the verbatim foreign key %q; got %v", foreignRel, diff.Added)
+	}
+}

@@ -103,6 +103,33 @@ func TestPlanRemap_OverrideWins(t *testing.T) {
 	}
 }
 
+// TestPlanRemap_DashedLocalHomeNotRemapped guards against misclassifying a
+// LOCAL project as foreign when the home's username contains a '-'
+// (e.g. /Users/bob-smith → -Users-bob-smith). The lossy encodedHomePrefix
+// heuristic alone would read "-Users-bob" as the home and rewrite the local
+// key, after which the delete pass could remove real local files. The exact
+// dstHomeEnc boundary check must take precedence and leave it untouched.
+func TestPlanRemap_DashedLocalHomeNotRemapped(t *testing.T) {
+	m := NewManifest("dev")
+	m.Files["projects/-Users-bob-smith-myproj/a.jsonl"] = FileEntry{ContentHash: "h"}
+	if plans := PlanRemap(m, "-Users-bob-smith", "", nil); len(plans) != 0 {
+		t.Errorf("local dashed-home project must not be remapped, got %+v", plans)
+	}
+}
+
+// TestPlanRemap_OriginHomeAuthoritative verifies the authoritative origin-home
+// prefix is preferred over the heuristic, so a foreign home with a dashed
+// username (-home-dan-lee) remaps as one unit instead of being mis-split into
+// -home-dan by encodedHomePrefix.
+func TestPlanRemap_OriginHomeAuthoritative(t *testing.T) {
+	m := NewManifest("dev")
+	m.Files["projects/-home-dan-lee-proj/a.jsonl"] = FileEntry{ContentHash: "h"}
+	plans := PlanRemap(m, "-Users-bob", "-home-dan-lee", nil)
+	if len(plans) != 1 || plans[0].DstKey != "-Users-bob-proj" {
+		t.Fatalf("origin-home swap wrong (heuristic mis-split?): %+v", plans)
+	}
+}
+
 // TestApplyRemap_EffectiveManifestKeys verifies ApplyRemap returns a new
 // manifest whose accepted-plan keys are rewritten while FileEntry values and
 // untouched keys are preserved.
@@ -148,6 +175,23 @@ func TestApplyRemap_CollisionKeepsHigherLineCount(t *testing.T) {
 	e := out.Files["projects/-Users-bob-p/s.jsonl"]
 	if e.ContentHash != "foreign" {
 		t.Errorf("collision winner = %q, want foreign (higher line count)", e.ContentHash)
+	}
+}
+
+// TestApplyRemap_TieKeepsLocalDeterministic guards collision resolution when a
+// remapped key lands on an existing local key and both have equal (here zero)
+// line counts — common for memory/.md and sessions-index/.json. The local entry
+// must win deterministically rather than depending on map iteration order, so
+// the loop runs many times to shake out nondeterminism.
+func TestApplyRemap_TieKeepsLocalDeterministic(t *testing.T) {
+	for i := range 50 {
+		m := NewManifest("dev")
+		m.Files["projects/-home-daniel-p/memory/MEMORY.md"] = FileEntry{ContentHash: "foreign"}
+		m.Files["projects/-Users-bob-p/memory/MEMORY.md"] = FileEntry{ContentHash: "local"}
+		out := ApplyRemap(m, []RemapPlan{{SrcKey: "-home-daniel-p", DstKey: "-Users-bob-p", Accepted: true}})
+		if got := out.Files["projects/-Users-bob-p/memory/MEMORY.md"].ContentHash; got != "local" {
+			t.Fatalf("tie should keep the local entry deterministically, got %q (iter %d)", got, i)
+		}
 	}
 }
 

@@ -590,7 +590,12 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 // "Added" = files in manifest but missing on disk (would be restored).
 // "Modified" = files on disk with different content than manifest (would be overwritten).
 // "Deleted" = managed files on disk but not in manifest (would be deleted).
-func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
+func UnsealStatus(cfg *config.Config, opts ...UnsealOption) (*DiffResult, error) {
+	opt := unsealConfig{remap: RemapAuto}
+	for _, fn := range opts {
+		fn(&opt)
+	}
+
 	manifest, err := LoadManifest(cfg.Seal.SealDir)
 	if err != nil {
 		return nil, fmt.Errorf("loading manifest: %w", err)
@@ -599,9 +604,10 @@ func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
 		return nil, noManifestErr(cfg.Seal.SealDir)
 	}
 
-	// Preview against the same effective local manifest unseal would build, so
-	// --dry-run reports the local (remapped) keys rather than the foreign ones.
-	manifest, _ = remapManifest(manifest, cfg, RemapAuto)
+	// Preview against the same effective local manifest unseal would build (in
+	// the requested mode), so --dry-run reports exactly what the real command
+	// would restore.
+	manifest, _ = remapManifest(manifest, cfg, opt.remap)
 
 	// Scan existing files. If claudeDir doesn't exist yet (first-time
 	// restore), treat as empty — all manifest files would be restored.

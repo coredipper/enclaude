@@ -36,9 +36,20 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 
 	cfg.Seal.ClaudeDir = getClaudeDir()
 
+	mode, err := resolveRemapMode()
+	if err != nil {
+		return err
+	}
+
 	if flagDryRun {
+		// Preview the same remap the real command would do. Interactive can't
+		// prompt during a preview, so show its auto proposal instead.
+		previewMode := mode
+		if previewMode == store.RemapInteractive {
+			previewMode = store.RemapAuto
+		}
 		fmt.Println("(dry run — showing what would change)")
-		diff, err := store.UnsealStatus(cfg)
+		diff, err := store.UnsealStatus(cfg, store.WithRemap(previewMode))
 		if err != nil {
 			return fmt.Errorf("unseal status: %w", err)
 		}
@@ -56,11 +67,6 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 			}
 		}
 		return nil
-	}
-
-	mode, err := resolveRemapMode()
-	if err != nil {
-		return err
 	}
 
 	identity, source, err := crypto.LoadKey()

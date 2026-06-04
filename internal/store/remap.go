@@ -93,17 +93,20 @@ func encodedHomePrefix(seg string) string {
 	return ""
 }
 
+// hasEncodedPrefix reports whether s begins with prefix at an encoded-segment
+// boundary (exact, or followed by '-'), so "-Users-bob" matches "-Users-bob-x"
+// but not "-Users-bobby".
+func hasEncodedPrefix(s, prefix string) bool {
+	return s == prefix || strings.HasPrefix(s, prefix+"-")
+}
+
 // swapEncodedPrefix replaces a leading oldEnc segment of s with newEnc, matched
-// only at an encoded-segment boundary (exact, or followed by '-') so "-Users-bob"
-// can't capture "-Users-bobby". Returns ok=false when s isn't under oldEnc.
+// at an encoded-segment boundary. Returns ok=false when s isn't under oldEnc.
 func swapEncodedPrefix(s, oldEnc, newEnc string) (string, bool) {
-	if s == oldEnc {
-		return newEnc, true
+	if !hasEncodedPrefix(s, oldEnc) {
+		return s, false
 	}
-	if strings.HasPrefix(s, oldEnc+"-") {
-		return newEnc + s[len(oldEnc):], true
-	}
-	return s, false
+	return newEnc + s[len(oldEnc):], true
 }
 
 // splitProjectKey splits a manifest relPath of the form
@@ -158,17 +161,27 @@ func PlanRemap(m *Manifest, dstHomeEnc, originHomeEnc string, overrides map[stri
 			continue
 		}
 
-		src := encodedHomePrefix(seg)
-		if src == "" && originHomeEnc != "" {
-			if _, ok := swapEncodedPrefix(seg, originHomeEnc, ""); ok {
-				src = originHomeEnc
+		// Determine the source home prefix, strongest signal first. Checking the
+		// authoritative dstHomeEnc/originHomeEnc by exact boundary BEFORE the
+		// lossy encodedHomePrefix heuristic is what keeps a local project under a
+		// dashed/dotted username (e.g. /Users/bob-smith) from being misread as
+		// "-Users-bob" and wrongly rewritten — which would then let the delete
+		// pass remove real local files.
+		switch {
+		case hasEncodedPrefix(seg, dstHomeEnc):
+			continue // already local
+		case originHomeEnc != "" && hasEncodedPrefix(seg, originHomeEnc):
+			if dst, ok := swapEncodedPrefix(seg, originHomeEnc, dstHomeEnc); ok {
+				plans = append(plans, RemapPlan{SrcKey: seg, DstKey: dst, Accepted: true})
 			}
-		}
-		if src == "" || src == dstHomeEnc {
-			continue // unrecognized, or already local
-		}
-		if dst, ok := swapEncodedPrefix(seg, src, dstHomeEnc); ok {
-			plans = append(plans, RemapPlan{SrcKey: seg, DstKey: dst, Accepted: true})
+		default:
+			src := encodedHomePrefix(seg)
+			if src == "" || src == dstHomeEnc {
+				continue // unrecognized, or already local
+			}
+			if dst, ok := swapEncodedPrefix(seg, src, dstHomeEnc); ok {
+				plans = append(plans, RemapPlan{SrcKey: seg, DstKey: dst, Accepted: true})
+			}
 		}
 	}
 
@@ -187,8 +200,11 @@ func sortPlans(plans []RemapPlan) {
 // ApplyRemap returns a NEW manifest whose keys under each accepted plan's SrcKey
 // are rewritten to its DstKey; FileEntry values are shared (treated immutable)
 // and untouched keys pass through. When a rewrite collides with an existing key
-// (the same logical project synced from two machines), the entry with the larger
-// JSONLLineCount wins — order-independent so the result is deterministic.
+// (the same logical project synced from two machines), the winner is chosen by a
+// total order — higher JSONLLineCount, then the un-remapped (local) entry, then
+// the larger ContentHash — so the result is deterministic regardless of map
+// iteration order. Non-JSONL files (line count 0) therefore prefer the local
+// entry rather than whichever happened to be visited first.
 func ApplyRemap(m *Manifest, plans []RemapPlan) *Manifest {
 	repl := make(map[string]string, len(plans))
 	for _, p := range plans {
@@ -197,26 +213,55 @@ func ApplyRemap(m *Manifest, plans []RemapPlan) *Manifest {
 		}
 	}
 
+	acc := make(map[string]remapCandidate, len(m.Files))
+	for relPath, entry := range m.Files {
+		nk := relPath
+		remapped := false
+		if seg, sub, ok := splitProjectKey(relPath); ok {
+			if dst, mapped := repl[seg]; mapped {
+				nk = "projects/" + dst + sub
+				remapped = true
+			}
+		}
+		c := remapCandidate{entry: entry, remapped: remapped}
+		if cur, clash := acc[nk]; clash && !candidateBetter(c, cur) {
+			continue
+		}
+		acc[nk] = c
+	}
+
 	out := &Manifest{
 		Version:    m.Version,
 		DeviceID:   m.DeviceID,
 		SealedAt:   m.SealedAt,
 		OriginHome: m.OriginHome,
-		Files:      make(map[string]FileEntry, len(m.Files)),
+		Files:      make(map[string]FileEntry, len(acc)),
 	}
-	for relPath, entry := range m.Files {
-		nk := relPath
-		if seg, sub, ok := splitProjectKey(relPath); ok {
-			if dst, mapped := repl[seg]; mapped {
-				nk = "projects/" + dst + sub
-			}
-		}
-		if existing, clash := out.Files[nk]; clash && entry.JSONLLineCount <= existing.JSONLLineCount {
-			continue // keep the existing (higher or equal line count) entry
-		}
-		out.Files[nk] = entry
+	for k, c := range acc {
+		out.Files[k] = c.entry
 	}
 	return out
+}
+
+// remapCandidate pairs a file entry with whether its key was rewritten, so a
+// collision can prefer the local (un-remapped) entry on a tie.
+type remapCandidate struct {
+	entry    FileEntry
+	remapped bool
+}
+
+// candidateBetter is the total order used to resolve a remap key collision:
+// more complete session (higher line count) first, then the un-remapped local
+// entry, then a stable ContentHash tiebreak. Being a total order makes the
+// "keep the max" loop in ApplyRemap independent of map iteration order.
+func candidateBetter(a, b remapCandidate) bool {
+	if a.entry.JSONLLineCount != b.entry.JSONLLineCount {
+		return a.entry.JSONLLineCount > b.entry.JSONLLineCount
+	}
+	if a.remapped != b.remapped {
+		return !a.remapped // prefer the local (un-remapped) entry
+	}
+	return a.entry.ContentHash > b.entry.ContentHash
 }
 
 // remapManifest rewrites foreign project keys in m into an effective local
