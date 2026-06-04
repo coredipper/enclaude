@@ -394,7 +394,6 @@ func TestMergeSessionsIndexDeduplicatesOnSessionId(t *testing.T) {
 	}
 }
 
-
 // BenchmarkMergeJSONL measures MergeJSONL throughput on two JSONL inputs that
 // share overlapping lines requiring deduplication.
 func BenchmarkMergeJSONL(b *testing.B) {
