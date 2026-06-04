@@ -79,10 +79,11 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 
 	objStore := sealstore.NewObjectStore(sealDir)
 	merged := sealstore.Manifest{
-		Version:  ours.Version,
-		DeviceID: ours.DeviceID,
-		SealedAt: time.Now().UTC().Format(time.RFC3339),
-		Files:    make(map[string]sealstore.FileEntry),
+		Version:    ours.Version,
+		DeviceID:   ours.DeviceID,
+		SealedAt:   time.Now().UTC().Format(time.RFC3339),
+		OriginHome: ours.OriginHome,
+		Files:      make(map[string]sealstore.FileEntry),
 	}
 
 	// Collect all file paths from both sides

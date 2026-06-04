@@ -16,9 +16,14 @@ working *on* the repo.
 - `internal/gitops` — git plumbing + hook install.
 - `internal/merge` — merge strategies + JSONL handling.
 - `internal/session` — Claude session detection.
-- `internal/store` — seal-store management.
+- `internal/store` — seal-store management. `remap.go` rewrites the
+  `projects/<encoded>` directory key on unseal so a store synced from a
+  machine with a different home lands where the local Claude Code looks;
+  device-local overrides live in `~/.enclaude/projectmap.local.toml`
+  (gitignored, never synced).
 - `internal/ui` — interactive prompts; passphrase reads are silent via
-  `golang.org/x/term`.
+  `golang.org/x/term`. General prompts (`Confirm`/`Choose`/`EditString`)
+  go through the injectable `ui.DefaultPrompt` seam.
 
 New cobra subcommand → new file under `cmd/`. New crypto/storage logic →
 under `internal/<package>`.
@@ -155,8 +160,10 @@ review.
 - Don't introduce error-handling layers, validation, or "future use"
   abstractions speculatively. Three similar lines beat a premature
   helper.
-- The `cmd.Version` ldflag, the `crypto.Default*` package-level
-  callback vars, and the `keyringSet` / `keyringGet` / `keyringDelete`
-  indirections all exist to keep call-site signatures stable across
-  the codebase. Prefer extending those patterns over adding a parameter
-  to every caller.
+- The `cmd.Version` ldflag, the `crypto.Default*` and
+  `store.DefaultRemapResolver` package-level callback vars, the
+  `ui.DefaultPrompt` seam, and the `keyringSet` / `keyringGet` /
+  `keyringDelete` indirections all exist to keep call-site signatures
+  stable across the codebase. Prefer extending those patterns over adding
+  a parameter to every caller. (`store.Unseal`'s `...UnsealOption` is the
+  same instinct: new behavior, untouched existing call sites.)

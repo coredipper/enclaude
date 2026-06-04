@@ -161,6 +161,7 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		maps.Copy(prior, manifest.Files)
 	}
 	manifest.DeviceID = cfg.Seal.DeviceID
+	manifest.OriginHome = homeDir(cfg.Seal.ClaudeDir)
 
 	// Active session IDs (PID-alive). Empty when the sessions dir is absent
 	// (e.g. tests) — falls back to path-based completion semantics.
@@ -384,12 +385,32 @@ func noManifestErr(sealDir string) error {
 	return fmt.Errorf("no manifest found — is the seal store initialized?")
 }
 
+// unsealConfig holds the optional knobs for Unseal. Defaults are set in Unseal.
+type unsealConfig struct {
+	remap RemapMode
+}
+
+// UnsealOption configures Unseal without changing its call-site signature —
+// existing callers pass nothing and get the defaults. Mirrors the project's
+// preference for stable signatures over threading a param through every caller.
+type UnsealOption func(*unsealConfig)
+
+// WithRemap sets how foreign project keys are handled (default RemapAuto).
+func WithRemap(mode RemapMode) UnsealOption {
+	return func(c *unsealConfig) { c.remap = mode }
+}
+
 // Unseal decrypts seal contents back to claudeDir and removes managed
 // files not in the manifest. The manifest is the source of truth.
-func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress ProgressFunc) (stats UnsealStats, err error) {
+func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress ProgressFunc, opts ...UnsealOption) (stats UnsealStats, err error) {
 	start := time.Now()
 	defer func() { stats.Elapsed = time.Since(start) }()
 	sealDir := cfg.Seal.SealDir
+
+	opt := unsealConfig{remap: RemapAuto}
+	for _, fn := range opts {
+		fn(&opt)
+	}
 
 	store := NewObjectStore(sealDir)
 
@@ -399,6 +420,15 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 	}
 	if manifest == nil {
 		return stats, noManifestErr(sealDir)
+	}
+
+	// Rewrite foreign project keys into an effective local manifest up front so
+	// BOTH the restore loop and the delete-reconciliation pass below operate on
+	// local keys — otherwise the latter would scan the freshly-restored file,
+	// miss it among the raw (foreign) keys, and delete what was just written.
+	manifest, err = remapManifest(manifest, cfg, opt.remap)
+	if err != nil {
+		return stats, err
 	}
 
 	stats.Total = len(manifest.Files)
@@ -568,6 +598,10 @@ func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
 	if manifest == nil {
 		return nil, noManifestErr(cfg.Seal.SealDir)
 	}
+
+	// Preview against the same effective local manifest unseal would build, so
+	// --dry-run reports the local (remapped) keys rather than the foreign ones.
+	manifest, _ = remapManifest(manifest, cfg, RemapAuto)
 
 	// Scan existing files. If claudeDir doesn't exist yet (first-time
 	// restore), treat as empty — all manifest files would be restored.

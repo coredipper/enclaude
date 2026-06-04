@@ -136,6 +136,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 const gitignoreContent = `# Never commit the unencrypted key
 *.key
 
+# Device-local project-key map — never synced
+projectmap.local.toml
+
 # Always track seal store metadata, even under a global gitignore
 !manifest.json
 !seal.toml

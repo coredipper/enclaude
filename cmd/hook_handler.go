@@ -86,7 +86,10 @@ func handleSessionStart() error {
 		return nil
 	}
 
-	_, err = store.Unseal(cfg, identity, false, nil)
+	// Session start can't block on a prompt, so remap runs in auto mode:
+	// deterministic home-prefix swaps are applied; anything ambiguous is left
+	// under its original key for `enclaude unseal --remap=interactive` to resolve.
+	_, err = store.Unseal(cfg, identity, false, nil, store.WithRemap(store.RemapAuto))
 	if err != nil {
 		logHook("unseal error: %v", err)
 	}
