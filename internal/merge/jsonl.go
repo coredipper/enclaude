@@ -1,12 +1,11 @@
 package merge
 
 import (
+	"bytes"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -14,25 +13,41 @@ import (
 // Lines are deduplicated by SHA-256 of their normalized JSON content.
 // The result is sorted by the "timestamp" field if present.
 func MergeJSONL(ours, theirs []byte) ([]byte, error) {
-	seen := make(map[string]string) // hash -> original line
+	seen := make(map[[32]byte]struct{}) // hash -> seen
 	var entries []jsonlEntry
 
+	// Create a single map and reuse it across all lines to eliminate
+	// map allocation overhead in parseJSONLine. We allocate it once here.
+	objMap := make(map[string]interface{})
+
 	for _, data := range [][]byte{ours, theirs} {
-		lines := splitLines(string(data))
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
+		// Optimization: avoid strings.Split to eliminate slice allocations.
+		// Instead walk the byte slice by checking for \n manually.
+		for len(data) > 0 {
+			var lineBytes []byte
+			idx := bytes.IndexByte(data, '\n')
+
+			if idx == -1 {
+				lineBytes = data
+				data = nil
+			} else {
+				lineBytes = data[:idx]
+				data = data[idx+1:]
+			}
+
+			lineBytes = bytes.TrimSpace(lineBytes)
+			if len(lineBytes) == 0 {
 				continue
 			}
 
-			hash, timestamp := parseJSONLine(line)
+			hash, timestamp := parseJSONLineBytes(lineBytes, objMap)
 			if _, exists := seen[hash]; exists {
 				continue
 			}
-			seen[hash] = line
+			seen[hash] = struct{}{}
 
 			entries = append(entries, jsonlEntry{
-				line:      line,
+				line:      lineBytes,
 				timestamp: timestamp,
 			})
 		}
@@ -43,13 +58,19 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 		return entries[i].timestamp < entries[j].timestamp
 	})
 
-	var result strings.Builder
+	// Optimization: preallocate capacity based on exact size
+	totalSize := 0
 	for _, e := range entries {
-		result.WriteString(e.line)
-		result.WriteByte('\n')
+		totalSize += len(e.line) + 1
 	}
 
-	return []byte(result.String()), nil
+	result := make([]byte, 0, totalSize)
+	for _, e := range entries {
+		result = append(result, e.line...)
+		result = append(result, '\n')
+	}
+
+	return result, nil
 }
 
 // MergeSessionsIndex merges two sessions-index.json files.
@@ -113,22 +134,21 @@ func MergeSessionsIndex(ours, theirs []byte) ([]byte, error) {
 }
 
 type jsonlEntry struct {
-	line      string
+	line      []byte
 	timestamp float64
 }
 
-func splitLines(s string) []string {
-	return strings.Split(s, "\n")
-}
-
-// parseJSONLine parses a JSON line once to extract both a normalized hash
+// parseJSONLineBytes parses a JSON line once to extract both a normalized hash
 // and a timestamp, avoiding duplicate unmarshaling overhead.
-func parseJSONLine(line string) (string, float64) {
-	var obj map[string]interface{}
-	if err := json.Unmarshal([]byte(line), &obj); err != nil {
+func parseJSONLineBytes(line []byte, obj map[string]interface{}) ([32]byte, float64) {
+	// Clear the pre-allocated map for reuse
+	for k := range obj {
+		delete(obj, k)
+	}
+
+	if err := json.Unmarshal(line, &obj); err != nil {
 		// Not valid JSON — hash the raw line
-		h := sha256.Sum256([]byte(line))
-		return hex.EncodeToString(h[:]), 0
+		return sha256.Sum256(line), 0
 	}
 
 	// Calculate timestamp
@@ -146,12 +166,11 @@ func parseJSONLine(line string) (string, float64) {
 
 	normalized, err := json.Marshal(obj)
 	if err != nil {
-		h := sha256.Sum256([]byte(line))
-		return hex.EncodeToString(h[:]), ts
+		return sha256.Sum256(line), ts
 	}
 
-	h := sha256.Sum256(normalized)
-	return hex.EncodeToString(h[:]), ts
+	// Optimize hash creation by returning byte array instead of hex string
+	return sha256.Sum256(normalized), ts
 }
 
 func extractSessionId(raw json.RawMessage) string {

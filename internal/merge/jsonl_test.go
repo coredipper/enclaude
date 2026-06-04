@@ -394,38 +394,6 @@ func TestMergeSessionsIndexDeduplicatesOnSessionId(t *testing.T) {
 	}
 }
 
-// TestSplitLines verifies that splitLines wraps strings.Split appropriately
-// and produces the expected raw slices including trailing empty strings
-// for inputs with trailing newlines.
-func TestSplitLines(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-	}{
-		{"empty", "", []string{""}},
-		{"newline", "\n", []string{"", ""}},
-		{"no newline", "a", []string{"a"}},
-		{"standard", "a\nb\n", []string{"a", "b", ""}},
-		{"multiple trailing", "a\n\n", []string{"a", "", ""}},
-		{"multiple lines no trailing", "a\nb", []string{"a", "b"}},
-		{"multiple empty inner", "a\n\nb", []string{"a", "", "b"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := splitLines(tt.input)
-			if len(got) != len(tt.expected) {
-				t.Fatalf("expected %d lines, got %d. Expected: %#v, Got: %#v", len(tt.expected), len(got), tt.expected, got)
-			}
-			for i := range got {
-				if got[i] != tt.expected[i] {
-					t.Errorf("line %d: expected %q, got %q", i, tt.expected[i], got[i])
-				}
-			}
-		})
-	}
-}
 
 // BenchmarkMergeJSONL measures MergeJSONL throughput on two JSONL inputs that
 // share overlapping lines requiring deduplication.
