@@ -119,7 +119,7 @@ func TestMergeJSONLWhitespaceDifference(t *testing.T) {
 
 // TestMergeJSONLDeepNormalization guards that semantically identical lines
 // deduplicate even when they differ below the top level — in nested-object key
-// order or numeric formatting. parseJSONLine decodes into map[string]interface{}
+// order or numeric formatting. parseJSONLineBytes decodes into map[string]interface{}
 // and re-marshals, which canonicalizes recursively; a decode target that keeps
 // values as raw bytes only sorts top-level keys and would silently treat these
 // as distinct, bloating the merged store with duplicates. TestMergeJSONLWhitespaceDifference

@@ -17,7 +17,7 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 	var entries []jsonlEntry
 
 	// Create a single map and reuse it across all lines to eliminate
-	// map allocation overhead in parseJSONLine. We allocate it once here.
+	// map allocation overhead in parseJSONLineBytes. We allocate it once here.
 	objMap := make(map[string]interface{})
 
 	for _, data := range [][]byte{ours, theirs} {
