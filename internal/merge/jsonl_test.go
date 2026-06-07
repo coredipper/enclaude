@@ -119,7 +119,7 @@ func TestMergeJSONLWhitespaceDifference(t *testing.T) {
 
 // TestMergeJSONLDeepNormalization guards that semantically identical lines
 // deduplicate even when they differ below the top level — in nested-object key
-// order or numeric formatting. parseJSONLine decodes into map[string]interface{}
+// order or numeric formatting. parseJSONLineBytes decodes into map[string]interface{}
 // and re-marshals, which canonicalizes recursively; a decode target that keeps
 // values as raw bytes only sorts top-level keys and would silently treat these
 // as distinct, bloating the merged store with duplicates. TestMergeJSONLWhitespaceDifference
@@ -391,39 +391,6 @@ func TestMergeSessionsIndexDeduplicatesOnSessionId(t *testing.T) {
 	count := strings.Count(string(merged), "same-id")
 	if count != 1 {
 		t.Errorf("expected sessionId to appear once, got %d times", count)
-	}
-}
-
-// TestSplitLines verifies that splitLines wraps strings.Split appropriately
-// and produces the expected raw slices including trailing empty strings
-// for inputs with trailing newlines.
-func TestSplitLines(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected []string
-	}{
-		{"empty", "", []string{""}},
-		{"newline", "\n", []string{"", ""}},
-		{"no newline", "a", []string{"a"}},
-		{"standard", "a\nb\n", []string{"a", "b", ""}},
-		{"multiple trailing", "a\n\n", []string{"a", "", ""}},
-		{"multiple lines no trailing", "a\nb", []string{"a", "b"}},
-		{"multiple empty inner", "a\n\nb", []string{"a", "", "b"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := splitLines(tt.input)
-			if len(got) != len(tt.expected) {
-				t.Fatalf("expected %d lines, got %d. Expected: %#v, Got: %#v", len(tt.expected), len(got), tt.expected, got)
-			}
-			for i := range got {
-				if got[i] != tt.expected[i] {
-					t.Errorf("line %d: expected %q, got %q", i, tt.expected[i], got[i])
-				}
-			}
-		})
 	}
 }
 
