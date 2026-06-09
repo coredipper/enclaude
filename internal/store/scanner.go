@@ -115,6 +115,7 @@ func fastRel(base, path string) (string, error) {
 type compiledPattern struct {
 	raw           string
 	hasDoubleStar bool
+	hasWildcard   bool
 }
 
 func compilePatterns(patterns []string) []compiledPattern {
@@ -123,6 +124,7 @@ func compilePatterns(patterns []string) []compiledPattern {
 		res[i] = compiledPattern{
 			raw:           p,
 			hasDoubleStar: strings.Contains(p, "**"),
+			hasWildcard:   strings.ContainsAny(p, "*?[\\"),
 		}
 	}
 	return res
@@ -131,6 +133,13 @@ func compilePatterns(patterns []string) []compiledPattern {
 // matchesAnyCompiled checks if a relative path matches any of the compiled glob patterns.
 func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
 	for _, p := range patterns {
+		if !p.hasWildcard {
+			if p.raw == relPath {
+				return true
+			}
+			continue
+		}
+
 		if !p.hasDoubleStar {
 			matched, _ := filepath.Match(p.raw, relPath)
 			if matched {
@@ -148,6 +157,10 @@ func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
 // MatchGlob matches a path against a glob pattern with ** support.
 // It avoids strings.Split on both path and pattern strings to eliminate slice allocations.
 func MatchGlob(path, pattern string) bool {
+	if !strings.ContainsAny(pattern, "*?[\\") {
+		return path == pattern
+	}
+
 	if !strings.Contains(pattern, "**") {
 		matched, _ := filepath.Match(pattern, path)
 		return matched
