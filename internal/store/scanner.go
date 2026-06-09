@@ -109,8 +109,10 @@ func fastRel(base, path string) (string, error) {
 	return filepath.Rel(base, path)
 }
 
-// compiledPattern holds a pre-processed glob pattern to avoid repeatedly
-// checking for double-stars. We no longer split the pattern ahead of time
+// compiledPattern holds a pre-processed glob pattern so the matcher can skip
+// per-path scanning of the pattern: hasWildcard short-circuits wildcard-free
+// patterns to a plain string compare, and hasDoubleStar picks the ** segment
+// walker over filepath.Match. We no longer split the pattern ahead of time
 // since matchSegmentsPatRem avoids allocations by splitting on the fly.
 type compiledPattern struct {
 	raw           string
