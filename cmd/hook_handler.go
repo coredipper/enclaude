@@ -40,18 +40,37 @@ func runHookHandler(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func handleSessionStart() error {
-	sealDir := getSealDir()
+// loadHookConfig loads the seal-store config for a hook invocation. ok=false
+// means the hook should exit silently — the store isn't initialized or the
+// config is unreadable, and hooks must never block Claude Code.
+func loadHookConfig() (cfg *config.Config, sealDir string, ok bool) {
+	sealDir = getSealDir()
 
 	// Check seal store exists
 	if _, err := os.Stat(sealDir + "/seal.toml"); os.IsNotExist(err) {
-		return nil // seal store not initialized, skip silently
+		return nil, sealDir, false // seal store not initialized, skip silently
 	}
 
 	cfg, err := config.Load(sealDir)
 	if err != nil {
 		logHook("error loading config: %v", err)
-		return nil // don't block Claude Code
+		return nil, sealDir, false // don't block Claude Code
+	}
+
+	// Like every other command, resolve the Claude dir for THIS machine rather
+	// than trusting the synced seal.toml. Hooks are the one path where getting
+	// this wrong is destructive: a session-end seal against another machine's
+	// (nonexistent) claude_dir scans zero files and commits a manifest with
+	// every entry deleted.
+	cfg.Seal.ClaudeDir = getClaudeDir()
+
+	return cfg, sealDir, true
+}
+
+func handleSessionStart() error {
+	cfg, sealDir, ok := loadHookConfig()
+	if !ok {
+		return nil
 	}
 
 	if !cfg.Sync.AutoUnsealOnSessionStart {
@@ -98,15 +117,8 @@ func handleSessionStart() error {
 }
 
 func handleSessionEnd() error {
-	sealDir := getSealDir()
-
-	if _, err := os.Stat(sealDir + "/seal.toml"); os.IsNotExist(err) {
-		return nil
-	}
-
-	cfg, err := config.Load(sealDir)
-	if err != nil {
-		logHook("error loading config: %v", err)
+	cfg, sealDir, ok := loadHookConfig()
+	if !ok {
 		return nil
 	}
 
