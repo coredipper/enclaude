@@ -109,12 +109,15 @@ func fastRel(base, path string) (string, error) {
 	return filepath.Rel(base, path)
 }
 
-// compiledPattern holds a pre-processed glob pattern to avoid repeatedly
-// checking for double-stars. We no longer split the pattern ahead of time
+// compiledPattern holds a pre-processed glob pattern so the matcher can skip
+// per-path scanning of the pattern: hasWildcard short-circuits wildcard-free
+// patterns to a plain string compare, and hasDoubleStar picks the ** segment
+// walker over filepath.Match. We no longer split the pattern ahead of time
 // since matchSegmentsPatRem avoids allocations by splitting on the fly.
 type compiledPattern struct {
 	raw           string
 	hasDoubleStar bool
+	hasWildcard   bool
 }
 
 func compilePatterns(patterns []string) []compiledPattern {
@@ -123,6 +126,7 @@ func compilePatterns(patterns []string) []compiledPattern {
 		res[i] = compiledPattern{
 			raw:           p,
 			hasDoubleStar: strings.Contains(p, "**"),
+			hasWildcard:   strings.ContainsAny(p, "*?[\\"),
 		}
 	}
 	return res
@@ -131,6 +135,13 @@ func compilePatterns(patterns []string) []compiledPattern {
 // matchesAnyCompiled checks if a relative path matches any of the compiled glob patterns.
 func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
 	for _, p := range patterns {
+		if !p.hasWildcard {
+			if p.raw == relPath {
+				return true
+			}
+			continue
+		}
+
 		if !p.hasDoubleStar {
 			matched, _ := filepath.Match(p.raw, relPath)
 			if matched {
@@ -148,6 +159,10 @@ func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
 // MatchGlob matches a path against a glob pattern with ** support.
 // It avoids strings.Split on both path and pattern strings to eliminate slice allocations.
 func MatchGlob(path, pattern string) bool {
+	if !strings.ContainsAny(pattern, "*?[\\") {
+		return path == pattern
+	}
+
 	if !strings.Contains(pattern, "**") {
 		matched, _ := filepath.Match(pattern, path)
 		return matched

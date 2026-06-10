@@ -361,3 +361,31 @@ func BenchmarkMatchGlob(b *testing.B) {
 	}
 	_ = sink
 }
+
+// BenchmarkScannerMatchesAny_ExactPattern exercises the wildcard-free fast path
+// in matchesAnyCompiled, where each pattern short-circuits to a string compare
+// instead of filepath.Match — the path the exact-pattern optimization targets,
+// which BenchmarkMatchGlob's all-wildcard cases never reach.
+func BenchmarkScannerMatchesAny_ExactPattern(b *testing.B) {
+	patterns := compilePatterns([]string{
+		"history.jsonl",
+		"settings.json",
+		"settings.local.json",
+		"projects/index.json",
+		"todos/index.json",
+		"statsig/statsig.cached.evaluations",
+	})
+	// Mix of a hit late in the list and a miss that scans every pattern.
+	paths := []string{
+		"settings.local.json",
+		"statsig/statsig.cached.evaluations",
+		"shell-snapshots/snapshot-zsh.sh",
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	var sink bool
+	for i := 0; i < b.N; i++ {
+		sink = matchesAnyCompiled(paths[i%len(paths)], patterns)
+	}
+	_ = sink
+}
