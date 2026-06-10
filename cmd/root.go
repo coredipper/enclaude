@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/store"
 	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -16,6 +17,7 @@ var (
 	flagDryRun    bool
 	flagClaudeDir string
 	flagSealDir   string
+	flagYes       bool
 )
 
 var rootCmd = &cobra.Command{
@@ -36,13 +38,19 @@ func Execute() {
 
 func init() {
 	crypto.DefaultPassphraseFunc = ui.ReadPassphrase
+	store.DefaultRemapResolver = remapResolver
 
 	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false, "show what would happen without doing it")
 	rootCmd.PersistentFlags().StringVar(&flagClaudeDir, "claude-dir", "", "override ~/.claude/ location")
 	rootCmd.PersistentFlags().StringVar(&flagSealDir, "seal-dir", "", "override ~/.enclaude/ location")
+	rootCmd.PersistentFlags().BoolVarP(&flagYes, "yes", "y", false, "accept prompts non-interactively (e.g. auto-accept project remaps)")
 }
 
+// getClaudeDir resolves the Claude directory for this machine. Commands call
+// it instead of trusting the claude_dir in seal.toml: the store is synced
+// across devices, so that value belongs to whichever machine ran `init` and is
+// wrong everywhere else. --claude-dir still wins when set.
 func getClaudeDir() string {
 	if flagClaudeDir != "" {
 		return flagClaudeDir

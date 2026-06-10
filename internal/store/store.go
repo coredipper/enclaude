@@ -161,6 +161,7 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		maps.Copy(prior, manifest.Files)
 	}
 	manifest.DeviceID = cfg.Seal.DeviceID
+	manifest.OriginHome = homeDir(cfg.Seal.ClaudeDir)
 
 	// Active session IDs (PID-alive). Empty when the sessions dir is absent
 	// (e.g. tests) — falls back to path-based completion semantics.
@@ -369,12 +370,47 @@ func unsealFile(store *ObjectStore, identity age.Identity, entry FileEntry, absP
 	return len(plaintext), nil
 }
 
+// noManifestErr explains a missing manifest. A store with encrypted objects but
+// no manifest.json is almost always a clone whose manifest was excluded by a
+// gitignore on the pushing device — the blobs are unrecoverable without the
+// relPath->hash mapping it holds, so point the user at the fix on that device.
+func noManifestErr(sealDir string) error {
+	if objs, _ := NewObjectStore(sealDir).ListAll(); len(objs) > 0 {
+		return fmt.Errorf("seal store at %s has %d encrypted objects but no manifest.json — "+
+			"it was likely excluded by a gitignore on the device that pushed it.\n"+
+			"On that device run:\n"+
+			"  git -C %s add -f manifest.json && git -C %s commit -m 'track manifest' && enclaude push\n"+
+			"then run `enclaude pull` here.", sealDir, len(objs), sealDir, sealDir)
+	}
+	return fmt.Errorf("no manifest found — is the seal store initialized?")
+}
+
+// unsealConfig holds the optional knobs for Unseal. Defaults are set in Unseal.
+type unsealConfig struct {
+	remap RemapMode
+}
+
+// UnsealOption configures Unseal without changing its call-site signature —
+// existing callers pass nothing and get the defaults. Mirrors the project's
+// preference for stable signatures over threading a param through every caller.
+type UnsealOption func(*unsealConfig)
+
+// WithRemap sets how foreign project keys are handled (default RemapAuto).
+func WithRemap(mode RemapMode) UnsealOption {
+	return func(c *unsealConfig) { c.remap = mode }
+}
+
 // Unseal decrypts seal contents back to claudeDir and removes managed
 // files not in the manifest. The manifest is the source of truth.
-func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress ProgressFunc) (stats UnsealStats, err error) {
+func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress ProgressFunc, opts ...UnsealOption) (stats UnsealStats, err error) {
 	start := time.Now()
 	defer func() { stats.Elapsed = time.Since(start) }()
 	sealDir := cfg.Seal.SealDir
+
+	opt := unsealConfig{remap: RemapAuto}
+	for _, fn := range opts {
+		fn(&opt)
+	}
 
 	store := NewObjectStore(sealDir)
 
@@ -383,7 +419,16 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		return stats, fmt.Errorf("loading manifest: %w", err)
 	}
 	if manifest == nil {
-		return stats, fmt.Errorf("no manifest found — is the seal store initialized?")
+		return stats, noManifestErr(sealDir)
+	}
+
+	// Rewrite foreign project keys into an effective local manifest up front so
+	// BOTH the restore loop and the delete-reconciliation pass below operate on
+	// local keys — otherwise the latter would scan the freshly-restored file,
+	// miss it among the raw (foreign) keys, and delete what was just written.
+	manifest, err = remapManifest(manifest, cfg, opt.remap)
+	if err != nil {
+		return stats, err
 	}
 
 	stats.Total = len(manifest.Files)
@@ -545,14 +590,24 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 // "Added" = files in manifest but missing on disk (would be restored).
 // "Modified" = files on disk with different content than manifest (would be overwritten).
 // "Deleted" = managed files on disk but not in manifest (would be deleted).
-func UnsealStatus(cfg *config.Config) (*DiffResult, error) {
+func UnsealStatus(cfg *config.Config, opts ...UnsealOption) (*DiffResult, error) {
+	opt := unsealConfig{remap: RemapAuto}
+	for _, fn := range opts {
+		fn(&opt)
+	}
+
 	manifest, err := LoadManifest(cfg.Seal.SealDir)
 	if err != nil {
 		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
 	if manifest == nil {
-		return nil, fmt.Errorf("no manifest found — is the seal store initialized?")
+		return nil, noManifestErr(cfg.Seal.SealDir)
 	}
+
+	// Preview against the same effective local manifest unseal would build (in
+	// the requested mode), so --dry-run reports exactly what the real command
+	// would restore.
+	manifest, _ = remapManifest(manifest, cfg, opt.remap)
 
 	// Scan existing files. If claudeDir doesn't exist yet (first-time
 	// restore), treat as empty — all manifest files would be restored.
@@ -739,7 +794,7 @@ func Verify(cfg *config.Config, identity age.Identity, verbose bool) (*RepairRes
 		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
 	if manifest == nil {
-		return nil, fmt.Errorf("no manifest found")
+		return nil, noManifestErr(sealDir)
 	}
 
 	result.TotalManifest = len(manifest.Files)

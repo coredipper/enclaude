@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -128,6 +129,39 @@ func TestManifestSave(t *testing.T) {
 	}
 	if loaded.Files["test.txt"].ContentHash != "hash123" {
 		t.Errorf("expected content hash 'hash123', got %q", loaded.Files["test.txt"].ContentHash)
+	}
+}
+
+// TestManifestSave_OriginHomeRoundTrip guards that the OriginHome field — the
+// authoritative source-home signal for the cross-device project remap —
+// survives a Save/Load cycle, and that an empty value is omitted (omitempty) so
+// older stores stay clean.
+func TestManifestSave_OriginHomeRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManifest("dev")
+	m.OriginHome = "/home/daniel"
+	if err := m.Save(dir); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatalf("LoadManifest: %v", err)
+	}
+	if loaded.OriginHome != "/home/daniel" {
+		t.Errorf("OriginHome round-trip = %q, want /home/daniel", loaded.OriginHome)
+	}
+
+	empty := t.TempDir()
+	m2 := NewManifest("dev")
+	if err := m2.Save(empty); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(empty, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "origin_home") {
+		t.Errorf("empty OriginHome should be omitted from JSON, got: %s", data)
 	}
 }
 

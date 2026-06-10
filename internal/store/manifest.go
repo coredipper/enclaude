@@ -10,10 +10,17 @@ import (
 
 // Manifest tracks all files in the seal store with their content hashes and metadata.
 type Manifest struct {
-	Version  int                  `json:"version"`
-	DeviceID string               `json:"device_id"`
-	SealedAt string               `json:"sealed_at"`
-	Files    map[string]FileEntry `json:"files"`
+	Version  int    `json:"version"`
+	DeviceID string `json:"device_id"`
+	SealedAt string `json:"sealed_at"`
+	// OriginHome is the absolute home directory of the machine that sealed this
+	// manifest. It is the authoritative signal for the cross-device project-key
+	// remap (see remap.go): the projects/ keys encode this home, and on another
+	// machine they must be rewritten to the local one. Optional — older stores
+	// (and the heuristic fallback) work without it; it self-populates on the
+	// next seal from an updated binary.
+	OriginHome string               `json:"origin_home,omitempty"`
+	Files      map[string]FileEntry `json:"files"`
 }
 
 // FileEntry describes a single file in the seal store.

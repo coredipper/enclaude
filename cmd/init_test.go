@@ -77,3 +77,17 @@ func TestBuildReadme(t *testing.T) {
 		})
 	}
 }
+
+// TestGitignoreContent_ForceTracksMetadata guards that the generated .gitignore
+// keeps excluding the key while re-including manifest.json — a global gitignore
+// matching the manifest once left clones unrecoverable (issue #94).
+func TestGitignoreContent_ForceTracksMetadata(t *testing.T) {
+	if !strings.Contains(gitignoreContent, "*.key") {
+		t.Error("gitignore must still exclude *.key")
+	}
+	for _, neg := range []string{"!manifest.json", "!seal.toml", "!.gitattributes", "!README.md"} {
+		if !strings.Contains(gitignoreContent, neg) {
+			t.Errorf("gitignore is missing the %q re-include", neg)
+		}
+	}
+}

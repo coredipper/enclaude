@@ -728,3 +728,89 @@ func TestPush(t *testing.T) {
 		t.Errorf("Expected 1 commit, got %d", stats.Commits)
 	}
 }
+
+// TestAddAll_ForceStagesIgnoredManifest guards that AddAll stages manifest.json
+// even when a gitignore rule would exclude it. A user's global core.excludesFile
+// matching e.g. *.json once silently dropped the manifest from the pushed repo,
+// leaving clones with un-decryptable blobs and no relPath->hash mapping (issue #94).
+func TestAddAll_ForceStagesIgnoredManifest(t *testing.T) {
+	dir := t.TempDir()
+	g := New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.name", "Test User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stand in for a hostile global core.excludesFile without touching the
+	// user's real git config: .git/info/exclude has the same precedence.
+	exclude := filepath.Join(dir, ".git", "info", "exclude")
+	if err := os.WriteFile(exclude, []byte("manifest.json\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := g.AddAll(); err != nil {
+		t.Fatalf("AddAll() error: %v", err)
+	}
+
+	out, err := g.run("ls-files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "manifest.json") {
+		t.Errorf("manifest.json was not staged despite ignore rule; git ls-files = %q", out)
+	}
+}
+
+// TestAddAll_ForceStagesIgnoredObjects guards that AddAll stages the objects/
+// blobs even when a gitignore rule would exclude them. A manifest force-staged
+// over un-pushed blobs is worse than no manifest — unseal starts, then fails
+// mid-restore on a missing object (issue #94 follow-up).
+func TestAddAll_ForceStagesIgnoredObjects(t *testing.T) {
+	dir := t.TempDir()
+	g := New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.name", "Test User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A hostile global rule matching the encrypted blobs (.age extension),
+	// simulated via .git/info/exclude which shares core.excludesFile precedence.
+	exclude := filepath.Join(dir, ".git", "info", "exclude")
+	if err := os.WriteFile(exclude, []byte("*.age\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	objPath := filepath.Join(dir, "objects", "ab", "cdef0123.age")
+	if err := os.MkdirAll(filepath.Dir(objPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(objPath, []byte("ciphertext"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := g.AddAll(); err != nil {
+		t.Fatalf("AddAll() error: %v", err)
+	}
+
+	out, err := g.run("ls-files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "objects/ab/cdef0123.age") {
+		t.Errorf("object blob was not staged despite ignore rule; git ls-files = %q", out)
+	}
+}

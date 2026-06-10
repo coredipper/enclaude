@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -513,4 +514,51 @@ func TestStatus(t *testing.T) {
 	if len(mixedStatus.Deleted) != 1 || mixedStatus.Deleted[0] != "CLAUDE.md" {
 		t.Errorf("mixed Status() Deleted = %v, expected [CLAUDE.md]", mixedStatus.Deleted)
 	}
+}
+
+// TestUnseal_ObjectsButNoManifest verifies the actionable error when a cloned seal
+// store has encrypted objects but no manifest.json — the manifest was excluded by a
+// gitignore on the pushing device (issue #94). A truly empty store keeps the
+// original "is the seal store initialized?" wording.
+func TestUnseal_ObjectsButNoManifest(t *testing.T) {
+	identity, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+
+	t.Run("objects present yields recovery guidance", func(t *testing.T) {
+		sealDir := t.TempDir()
+		objStore := NewObjectStore(sealDir)
+		if err := objStore.Init(); err != nil {
+			t.Fatal(err)
+		}
+		hash := ContentHash([]byte("ciphertext"))
+		if err := objStore.Write(hash, []byte("ciphertext")); err != nil {
+			t.Fatal(err)
+		}
+		cfg := config.DefaultConfig(t.TempDir(), sealDir)
+
+		_, err := Unseal(cfg, identity, false, nil)
+		if err == nil {
+			t.Fatal("Unseal() with objects but no manifest returned nil error")
+		}
+		for _, want := range []string{"manifest.json", "add -f", "encrypted objects"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q is missing %q", err.Error(), want)
+			}
+		}
+	})
+
+	t.Run("empty store reports not initialized", func(t *testing.T) {
+		sealDir := t.TempDir()
+		cfg := config.DefaultConfig(t.TempDir(), sealDir)
+
+		_, err := Unseal(cfg, identity, false, nil)
+		if err == nil {
+			t.Fatal("Unseal() on empty store returned nil error")
+		}
+		if !strings.Contains(err.Error(), "is the seal store initialized?") {
+			t.Errorf("error %q is missing the initialized hint", err.Error())
+		}
+	})
 }

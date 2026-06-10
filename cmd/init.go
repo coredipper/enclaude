@@ -96,8 +96,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write .gitignore
-	gitignore := "# Never commit the unencrypted key\n*.key\n"
-	if err := os.WriteFile(filepath.Join(sealDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(sealDir, ".gitignore"), []byte(gitignoreContent), 0644); err != nil {
 		return fmt.Errorf("writing .gitignore: %w", err)
 	}
 
@@ -130,6 +129,22 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("  2. enclaude hooks install              # enable auto-sync")
 	return nil
 }
+
+// gitignoreContent excludes the unencrypted key and force-tracks the seal store
+// metadata. The negations outrank a global core.excludesFile, so a user-wide rule
+// (e.g. *.json) can't silently drop manifest.json from the pushed repo.
+const gitignoreContent = `# Never commit the unencrypted key
+*.key
+
+# Device-local project-key map — never synced
+projectmap.local.toml
+
+# Always track seal store metadata, even under a global gitignore
+!manifest.json
+!seal.toml
+!.gitattributes
+!README.md
+`
 
 const readmeTemplate = `# enclaude seal store
 

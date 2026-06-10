@@ -92,6 +92,42 @@ enclaude unseal
 enclaude hooks install
 ```
 
+### Projects Across Devices
+
+Claude Code stores per-project state under `~/.claude/projects/<encoded>/`, where
+`<encoded>` is the project's **absolute path** with `/` and `.` turned into `-`
+(e.g. `/Users/you/code/app` → `-Users-you-code-app`). That path differs between
+machines with different home directories or checkout locations, so a project
+sealed on one machine would otherwise restore under a key the other machine's
+Claude Code never looks at — the data is present and decrypted, just invisible.
+
+`enclaude unseal` detects project dirs sealed on another machine and offers to
+remap them to this machine's key. By default it's interactive — accept the
+proposed local key, edit it, or skip — and your choices are remembered
+per-device. Control it with `--remap`:
+
+```bash
+enclaude unseal --remap=interactive   # default on a terminal: ask per project
+enclaude unseal --remap=auto          # apply the home-prefix swap, no prompts
+enclaude unseal --remap=off           # restore verbatim (legacy behavior)
+enclaude unseal --yes                 # accept all proposals non-interactively
+```
+
+The session-start hook always runs in `auto` mode (it never blocks on a prompt),
+applying unambiguous home-prefix swaps and leaving anything else for an
+interactive `unseal`. Inspect and pin mappings directly:
+
+```bash
+enclaude project list                 # show project dirs and local/foreign status
+enclaude project map  <src> <target>  # pin a mapping (encoded keys or paths)
+enclaude project unmap <src>          # remove a pinned mapping
+```
+
+Mappings live in `~/.enclaude/projectmap.local.toml`, which is device-local and
+never synced. **Note:** only the project *directory key* is remapped so the
+project becomes discoverable — absolute paths embedded inside transcripts (cwd,
+tool arguments) are left as a historical record and are not rewritten.
+
 ### Auto-Sync with Hooks
 
 ```bash
@@ -138,6 +174,9 @@ This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. Wh
 | `hooks remove` | Remove auto-sync hooks |
 | `hooks status` | Check if hooks are installed |
 | `readme-regen` | Regenerate and commit README.md in the seal store |
+| `project list` | List synced project dirs and their local/foreign status |
+| `project map <src> <target>` | Pin a device-local project-key remap |
+| `project unmap <src>` | Remove a pinned project-key remap |
 
 ## Merge Strategies
 
@@ -211,6 +250,7 @@ patterns = [
 - **During an active Claude Code session, plaintext exists on disk.** This is unavoidable — Claude Code reads `~/.claude/` directly and cannot be modified to read encrypted data. Use OS-level disk encryption (FileVault, BitLocker, LUKS) for protection during sessions.
 - **Application-level encryption does not protect against a malicious process running as your user.** If an attacker has code execution as your user, they can read decrypted files in memory or extract the key from the keychain. OS-level protections are the right defense layer here.
 - **The encryption key must be shared across devices.** This is inherent to any cross-device sync scheme. Use `key export` to save your key in a password manager, or rely on the passphrase-encrypted `key.age.backup` that travels with the repo.
+- **Cross-device project remap only fixes the directory key.** `unseal` places a synced project where the local Claude Code looks (see [Projects Across Devices](#projects-across-devices)), but absolute paths embedded inside transcripts (cwd, tool arguments) keep the originating machine's paths as a historical record — they are not rewritten, and Claude Code does not re-execute them.
 
 ## How It Works Under the Hood
 

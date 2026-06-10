@@ -91,6 +91,32 @@ device_id = "test-device"
 	}
 }
 
+// TestLoadPinsSealDirToLoadLocation verifies Load overrides the stored
+// seal_dir with the directory it actually read seal.toml from. The store is
+// synced across machines, so a seal_dir baked in by `init` on another device
+// (with a different home) is stale — the manifest and objects always live next
+// to the seal.toml we just loaded, so that location is authoritative.
+func TestLoadPinsSealDirToLoadLocation(t *testing.T) {
+	sealDir := t.TempDir()
+	content := `config_version = 2
+[seal]
+claude_dir = "/home/daniel/.claude"
+seal_dir = "/home/daniel/.enclaude"
+device_id = "test-device"
+`
+	if err := os.WriteFile(filepath.Join(sealDir, "seal.toml"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(sealDir)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.Seal.SealDir != sealDir {
+		t.Errorf("SealDir should be pinned to load location %q, got %q", sealDir, cfg.Seal.SealDir)
+	}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	sealDir := t.TempDir()
 	orig := DefaultConfig("/tmp/claude", sealDir)
