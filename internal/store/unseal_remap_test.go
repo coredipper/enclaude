@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -172,5 +173,66 @@ func TestUnsealStatus_RemapOff(t *testing.T) {
 	}
 	if !sawForeign {
 		t.Errorf("RemapOff dry-run should preview the verbatim foreign key %q; got %v", foreignRel, diff.Added)
+	}
+}
+
+// TestUnsealThenSeal_PreservesObjectBytesAcrossDeviceSwitch guards against
+// history bloat on machine switches: the first seal after a remapped unseal
+// re-keys the manifest to local project keys, and every object blob must
+// survive byte-identical — only the keys changed, not the content, and a
+// rewrite would re-commit the full store to the synced git history on every
+// switch.
+func TestUnsealThenSeal_PreservesObjectBytesAcrossDeviceSwitch(t *testing.T) {
+	sealDir, id, foreignRel := sealForeignProject(t)
+
+	objStore := NewObjectStore(sealDir)
+	hashes, err := objStore.ListAll()
+	if err != nil || len(hashes) == 0 {
+		t.Fatalf("want sealed objects, got %d (err=%v)", len(hashes), err)
+	}
+	before := make(map[string][]byte, len(hashes))
+	for _, h := range hashes {
+		b, err := objStore.Read(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[h] = b
+	}
+
+	dstHome := t.TempDir()
+	dstClaude := filepath.Join(dstHome, ".claude")
+	cfg := config.DefaultConfig(dstClaude, sealDir)
+	if _, err := Unseal(cfg, id, false, nil, WithRemap(RemapAuto)); err != nil {
+		t.Fatalf("Unseal: %v", err)
+	}
+
+	if _, err := Seal(cfg, id.Recipient(), false, nil); err != nil {
+		t.Fatalf("re-seal: %v", err)
+	}
+
+	for h, b := range before {
+		after, err := objStore.Read(h)
+		if err != nil {
+			t.Fatalf("object %s missing after re-seal: %v", h[:16], err)
+		}
+		if !bytes.Equal(b, after) {
+			t.Errorf("object %s rewritten by re-seal", h[:16])
+		}
+	}
+
+	m, err := LoadManifest(sealDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	localKey := "projects/" + encodePath(dstHome) + "-core-enclaude/a.jsonl"
+	entry, ok := m.Files[localKey]
+	if !ok {
+		t.Fatalf("manifest missing local key %s", localKey)
+	}
+	if !objStore.Exists(entry.ContentHash) {
+		t.Errorf("local entry points at missing object %s", entry.ContentHash[:16])
+	}
+	if _, ok := m.Files[foreignRel]; ok {
+		t.Errorf("foreign key %s still in manifest after re-seal", foreignRel)
 	}
 }

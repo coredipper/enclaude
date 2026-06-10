@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -561,4 +562,69 @@ func TestUnseal_ObjectsButNoManifest(t *testing.T) {
 			t.Errorf("error %q is missing the initialized hint", err.Error())
 		}
 	})
+}
+
+// TestSeal_ReusesExistingObjectForNewPath guards the write side of the
+// content-addressed dedup: sealing a new path whose content is already in the
+// object store must not rewrite the blob. age encryption is non-deterministic,
+// so re-encrypting identical plaintext changes bytes git has already
+// committed, re-committing full copies of data that did not change.
+func TestSeal_ReusesExistingObjectForNewPath(t *testing.T) {
+	claudeDir := t.TempDir()
+	content := []byte("# identical content\n")
+	if err := os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sealDir := t.TempDir()
+	identity, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("first Seal() error: %v", err)
+	}
+	hash := ContentHash(content)
+	store := NewObjectStore(sealDir)
+	before, err := store.Read(hash)
+	if err != nil {
+		t.Fatalf("object missing after first seal: %v", err)
+	}
+
+	// Same content appears under a second managed path.
+	if err := os.WriteFile(filepath.Join(claudeDir, "RTK.md"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := Seal(cfg, identity.Recipient(), false, nil)
+	if err != nil {
+		t.Fatalf("second Seal() error: %v", err)
+	}
+	if stats.Added != 1 {
+		t.Errorf("Added = %d, want 1", stats.Added)
+	}
+
+	after, err := store.Read(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("object rewritten: same plaintext re-encrypted to different ciphertext")
+	}
+
+	m, err := LoadManifest(sealDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := m.Files["RTK.md"]
+	if !ok {
+		t.Fatal("RTK.md missing from manifest")
+	}
+	if entry.ContentHash != hash {
+		t.Errorf("RTK.md ContentHash = %s, want %s", entry.ContentHash, hash)
+	}
+	if entry.SizeEncrypted != int64(len(before)) {
+		t.Errorf("SizeEncrypted = %d, want %d (existing object's size)", entry.SizeEncrypted, len(before))
+	}
 }

@@ -36,6 +36,17 @@ func (s *ObjectStore) Exists(hash string) bool {
 	return err == nil
 }
 
+// Size returns the on-disk size of the object for the given hash, and whether
+// it exists — one stat for callers that reuse an existing object and need its
+// encrypted size without reading it.
+func (s *ObjectStore) Size(hash string) (int64, bool) {
+	info, err := os.Stat(s.ObjectPath(hash))
+	if err != nil {
+		return 0, false
+	}
+	return info.Size(), true
+}
+
 // Write stores encrypted data at the content-addressed path.
 func (s *ObjectStore) Write(hash string, encrypted []byte) error {
 	path := s.ObjectPath(hash)

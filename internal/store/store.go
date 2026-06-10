@@ -226,19 +226,29 @@ func processFile(f ScanResult, manifest *Manifest, store *ObjectStore, recipient
 		return
 	}
 
-	// Encrypt and store
-	encrypted, err := crypto.Encrypt(plaintext, recipient)
-	if err != nil {
-		if verbose {
-			fmt.Fprintf(os.Stderr, "  warning: cannot encrypt %s: %v\n", f.RelPath, err)
+	// Encrypt and store — unless the content already has an object under
+	// another key (the same file synced from a machine with different project
+	// keys, or duplicate content). age output is non-deterministic, so
+	// re-encrypting identical plaintext would rewrite blob bytes git has
+	// already committed and re-push the whole object. Rotate overwrites
+	// ciphertext in place on purpose, so this check stays out of
+	// ObjectStore.Write.
+	encSize, exists := store.Size(hash)
+	if !exists {
+		encrypted, err := crypto.Encrypt(plaintext, recipient)
+		if err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  warning: cannot encrypt %s: %v\n", f.RelPath, err)
+			}
+			stats.Errors++
+			return
 		}
-		stats.Errors++
-		return
-	}
 
-	if err := store.Write(hash, encrypted); err != nil {
-		stats.Errors++
-		return
+		if err := store.Write(hash, encrypted); err != nil {
+			stats.Errors++
+			return
+		}
+		encSize = int64(len(encrypted))
 	}
 
 	// Determine if this is new or modified
@@ -248,7 +258,7 @@ func processFile(f ScanResult, manifest *Manifest, store *ObjectStore, recipient
 		stats.Added++
 	}
 	stats.BytesPlaintext += f.Size
-	stats.BytesEncrypted += int64(len(encrypted))
+	stats.BytesEncrypted += encSize
 
 	if verbose {
 		action := "new"
@@ -270,7 +280,7 @@ func processFile(f ScanResult, manifest *Manifest, store *ObjectStore, recipient
 	manifest.Files[f.RelPath] = FileEntry{
 		ContentHash:     hash,
 		SizePlaintext:   f.Size,
-		SizeEncrypted:   int64(len(encrypted)),
+		SizeEncrypted:   encSize,
 		Mtime:           time.Unix(0, f.ModTimeNs).UTC().Format(time.RFC3339),
 		ModTimeNs:       f.ModTimeNs,
 		MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
