@@ -57,15 +57,10 @@ func runPush(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println(stats.Multiline("  "))
 
-	if stats.HasChanges() {
-		if err := git.AddAll(); err != nil {
-			return fmt.Errorf("git add: %w", err)
-		}
-		msg := fmt.Sprintf("seal: seal from %s (%s)",
-			cfg.Seal.DeviceID, stats)
-		if err := git.Commit(msg); err != nil {
-			return fmt.Errorf("git commit: %w", err)
-		}
+	msg := fmt.Sprintf("seal: seal from %s (%s)",
+		cfg.Seal.DeviceID, stats)
+	if _, err := commitSealStore(sealDir, msg); err != nil {
+		return err
 	}
 
 	// Push

@@ -5,7 +5,6 @@ import (
 
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
-	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -73,18 +72,13 @@ func runSeal(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("seal had %d errors", stats.Errors)
 	}
 
-	// Commit if there are changes
-	if stats.HasChanges() {
-		git := gitops.New(sealDir)
-		if err := git.AddAll(); err != nil {
-			return fmt.Errorf("git add: %w", err)
-		}
-
-		msg := fmt.Sprintf("seal: seal from %s (%s)",
-			cfg.Seal.DeviceID, stats)
-		if err := git.Commit(msg); err != nil {
-			return fmt.Errorf("git commit: %w", err)
-		}
+	msg := fmt.Sprintf("seal: seal from %s (%s)",
+		cfg.Seal.DeviceID, stats)
+	committed, err := commitSealStore(sealDir, msg)
+	if err != nil {
+		return err
+	}
+	if committed {
 		fmt.Println("  Committed to seal store.")
 	} else {
 		fmt.Println("  No changes to commit.")

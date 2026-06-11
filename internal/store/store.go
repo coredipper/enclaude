@@ -174,6 +174,15 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 	}
 	stats.Scanned = len(files)
 
+	// A zero-file scan against a populated manifest is almost always a wrong
+	// claude_dir (a synced foreign path, a typo'd --claude-dir) — sealing it
+	// would track every entry as deleted, and a later unseal turns that into
+	// real deletions on other machines. Refuse rather than wipe.
+	if len(files) == 0 && len(manifest.Files) > 0 {
+		return stats, fmt.Errorf("scanned 0 files under %s but the manifest tracks %d — refusing to seal what would delete every entry; check claude_dir (or --claude-dir), or delete the seal store and re-init if this is intentional",
+			cfg.Seal.ClaudeDir, len(manifest.Files))
+	}
+
 	// Track which files still exist (for deletion detection)
 	seen := make(map[string]bool)
 
@@ -982,7 +991,7 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 		return 0, fmt.Errorf("loading manifest: %w", err)
 	}
 	if manifest == nil {
-		return 0, fmt.Errorf("no manifest found")
+		return 0, noManifestErr(sealDir)
 	}
 
 	total := len(manifest.Files)

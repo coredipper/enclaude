@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/coredipper/enclaude/internal/crypto"
+	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/coredipper/enclaude/internal/store"
 	"github.com/coredipper/enclaude/internal/ui"
 	"github.com/spf13/cobra"
@@ -73,4 +74,23 @@ func getSealDir() string {
 		os.Exit(1)
 	}
 	return home + "/.enclaude"
+}
+
+// commitSealStore stages the seal dir and commits when anything is staged,
+// returning whether a commit was made. The commit is gated on staged changes
+// rather than the seal's own stats: AddAll force-stages store metadata that a
+// gitignore may have kept out of history, and that rescue must not wait for
+// the next content change.
+func commitSealStore(sealDir, msg string) (bool, error) {
+	git := gitops.New(sealDir)
+	if err := git.AddAll(); err != nil {
+		return false, fmt.Errorf("git add: %w", err)
+	}
+	if !git.HasCachedChanges() {
+		return false, nil
+	}
+	if err := git.Commit(msg); err != nil {
+		return false, fmt.Errorf("git commit: %w", err)
+	}
+	return true, nil
 }
