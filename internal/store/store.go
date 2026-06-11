@@ -155,10 +155,13 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 		return stats, fmt.Errorf("loading manifest: %w", err)
 	}
 	prior := map[string]FileEntry{}
+	existed := manifest != nil
+	var priorDeviceID, priorOriginHome string
 	if manifest == nil {
 		manifest = NewManifest(cfg.Seal.DeviceID)
 	} else {
 		maps.Copy(prior, manifest.Files)
+		priorDeviceID, priorOriginHome = manifest.DeviceID, manifest.OriginHome
 	}
 	manifest.DeviceID = cfg.Seal.DeviceID
 	manifest.OriginHome = homeDir(cfg.Seal.ClaudeDir)
@@ -198,9 +201,15 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 	trackDeleted(manifest, seen, verbose, &stats)
 	tallySessions(manifest, prior, &stats)
 
-	// Save manifest
-	if err := manifest.Save(sealDir); err != nil {
-		return stats, fmt.Errorf("saving manifest: %w", err)
+	// Persist only when something real changed (content, first seal, or a
+	// DeviceID/OriginHome refresh): Save rewrites sealed_at, and a
+	// timestamp-only rewrite hands the staged-diff commit gate a manifest
+	// change, turning every scheduled no-op seal into a commit.
+	if stats.HasChanges() || !existed ||
+		manifest.DeviceID != priorDeviceID || manifest.OriginHome != priorOriginHome {
+		if err := manifest.Save(sealDir); err != nil {
+			return stats, fmt.Errorf("saving manifest: %w", err)
+		}
 	}
 
 	stats.Elapsed = time.Since(start)

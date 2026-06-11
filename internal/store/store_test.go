@@ -693,3 +693,45 @@ func TestSeal_RefusesFullWipeOnEmptyScan(t *testing.T) {
 		t.Error("manifest was emptied despite the refusal")
 	}
 }
+
+// TestSeal_NoOpLeavesManifestUntouched guards that a seal with no content
+// changes does not rewrite manifest.json: Save refreshes sealed_at, and a
+// timestamp-only rewrite hands the staged-diff commit gate a manifest change,
+// turning every scheduled no-op seal into a commit.
+func TestSeal_NoOpLeavesManifestUntouched(t *testing.T) {
+	claudeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("# hi\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	sealDir := t.TempDir()
+	identity, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("first Seal() error: %v", err)
+	}
+	manifestPath := filepath.Join(sealDir, "manifest.json")
+	info1, err := os.Stat(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := Seal(cfg, identity.Recipient(), false, nil)
+	if err != nil {
+		t.Fatalf("second Seal() error: %v", err)
+	}
+	if stats.HasChanges() {
+		t.Fatalf("second seal saw changes: %s", stats)
+	}
+
+	info2, err := os.Stat(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info1.ModTime().Equal(info2.ModTime()) {
+		t.Error("no-op seal rewrote manifest.json (sealed_at churn)")
+	}
+}
