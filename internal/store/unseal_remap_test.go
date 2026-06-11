@@ -236,3 +236,76 @@ func TestUnsealThenSeal_PreservesObjectBytesAcrossDeviceSwitch(t *testing.T) {
 		t.Errorf("foreign key %s still in manifest after re-seal", foreignRel)
 	}
 }
+
+// TestUnseal_DeclinedRemapIsRemembered guards that an interactive "skip" is a
+// remembered decision: the decline persists as a verbatim device-local pin, so
+// the next interactive unseal restores silently instead of re-asking for the
+// same project every time.
+func TestUnseal_DeclinedRemapIsRemembered(t *testing.T) {
+	sealDir, id, foreignRel := sealForeignProject(t)
+
+	prev := DefaultRemapResolver
+	defer func() { DefaultRemapResolver = prev }()
+	calls := 0
+	DefaultRemapResolver = func(plans []RemapPlan) ([]RemapPlan, error) {
+		calls++
+		for i := range plans {
+			plans[i].Accepted = false
+		}
+		return plans, nil
+	}
+
+	dstClaude := filepath.Join(t.TempDir(), ".claude")
+	cfg := config.DefaultConfig(dstClaude, sealDir)
+
+	if _, err := Unseal(cfg, id, false, nil, WithRemap(RemapInteractive)); err != nil {
+		t.Fatalf("Unseal: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("resolver consulted %d times on first unseal, want 1", calls)
+	}
+	if _, err := os.Stat(filepath.Join(dstClaude, foreignRel)); err != nil {
+		t.Errorf("declined project not restored verbatim: %v", err)
+	}
+	src := "-home-daniel-core-enclaude"
+	if got := LoadOverrides(sealDir)[src]; got != src {
+		t.Errorf("decline not pinned: overrides[%s] = %q, want %q", src, got, src)
+	}
+
+	if _, err := Unseal(cfg, id, false, nil, WithRemap(RemapInteractive)); err != nil {
+		t.Fatalf("second Unseal: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("resolver re-consulted after decline was pinned (%d calls)", calls)
+	}
+}
+
+// TestUnseal_PinnedOverrideSkipsPrompt guards that an existing device-local
+// override resolves silently in interactive mode — pins exist so later
+// unseals don't re-ask.
+func TestUnseal_PinnedOverrideSkipsPrompt(t *testing.T) {
+	sealDir, id, _ := sealForeignProject(t)
+
+	src := "-home-daniel-core-enclaude"
+	if err := SaveOverrides(sealDir, map[string]string{src: "-Users-pinned-proj"}); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := DefaultRemapResolver
+	defer func() { DefaultRemapResolver = prev }()
+	DefaultRemapResolver = func(plans []RemapPlan) ([]RemapPlan, error) {
+		t.Error("resolver consulted despite all plans being pinned")
+		return plans, nil
+	}
+
+	dstClaude := filepath.Join(t.TempDir(), ".claude")
+	cfg := config.DefaultConfig(dstClaude, sealDir)
+
+	if _, err := Unseal(cfg, id, false, nil, WithRemap(RemapInteractive)); err != nil {
+		t.Fatalf("Unseal: %v", err)
+	}
+	pinnedPath := filepath.Join(dstClaude, "projects", "-Users-pinned-proj", "a.jsonl")
+	if _, err := os.Stat(pinnedPath); err != nil {
+		t.Errorf("pinned target %s not restored: %v", pinnedPath, err)
+	}
+}

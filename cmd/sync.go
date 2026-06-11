@@ -62,15 +62,10 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println(sealStats.Multiline("    "))
 
-	if sealStats.HasChanges() {
-		if err := git.AddAll(); err != nil {
-			return fmt.Errorf("git add: %w", err)
-		}
-		msg := fmt.Sprintf("seal: seal from %s (%s)",
-			cfg.Seal.DeviceID, sealStats)
-		if err := git.Commit(msg); err != nil {
-			return fmt.Errorf("git commit: %w", err)
-		}
+	msg := fmt.Sprintf("seal: seal from %s (%s)",
+		cfg.Seal.DeviceID, sealStats)
+	if _, err := commitSealStore(sealDir, msg); err != nil {
+		return err
 	}
 
 	// 2. Pull

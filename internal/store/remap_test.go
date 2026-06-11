@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"github.com/coredipper/enclaude/internal/config"
 )
 
 // TestEncodePath_DotAndSlash pins the project-key encoding that Claude Code
@@ -230,5 +232,28 @@ func TestLoadSaveOverrides_RoundTrip(t *testing.T) {
 	}
 	if _, err := filepath.Abs(filepath.Join(dir, "projectmap.local.toml")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestProjectDirs_OriginHomeMarksUnrecognizedForeign verifies that `project
+// list` classification consults manifest.OriginHome like PlanRemap does: a
+// foreign home outside the -Users/-home/-root heuristic (e.g. /var/home/x)
+// must still show as foreign, since unseal would remap it via the
+// authoritative origin.
+func TestProjectDirs_OriginHomeMarksUnrecognizedForeign(t *testing.T) {
+	m := &Manifest{
+		OriginHome: "/var/home/x",
+		Files: map[string]FileEntry{
+			"projects/-var-home-x-proj/a.jsonl": {},
+		},
+	}
+	cfg := config.DefaultConfig("/Users/testbob/.claude", t.TempDir())
+
+	infos := ProjectDirs(m, cfg)
+	if len(infos) != 1 {
+		t.Fatalf("got %d project infos, want 1", len(infos))
+	}
+	if !infos[0].Foreign {
+		t.Errorf("key %s with OriginHome %s not classified foreign", infos[0].Key, m.OriginHome)
 	}
 }

@@ -814,3 +814,44 @@ func TestAddAll_ForceStagesIgnoredObjects(t *testing.T) {
 		t.Errorf("object blob was not staged despite ignore rule; git ls-files = %q", out)
 	}
 }
+
+// TestAddAll_ForceStagesIgnoredSealToml guards that AddAll stages seal.toml
+// even when a gitignore rule (e.g. a global *.toml) would exclude it. Without
+// the config a clone fails at config.Load before unseal can even look for the
+// manifest.
+func TestAddAll_ForceStagesIgnoredSealToml(t *testing.T) {
+	dir := t.TempDir()
+	g := New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.name", "Test User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stand in for a hostile global core.excludesFile without touching the
+	// user's real git config: .git/info/exclude has the same precedence.
+	exclude := filepath.Join(dir, ".git", "info", "exclude")
+	if err := os.WriteFile(exclude, []byte("*.toml\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "seal.toml"), []byte("config_version = 2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := g.AddAll(); err != nil {
+		t.Fatalf("AddAll() error: %v", err)
+	}
+
+	out, err := g.run("ls-files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "seal.toml") {
+		t.Errorf("seal.toml was not staged despite ignore rule; git ls-files = %q", out)
+	}
+}

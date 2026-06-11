@@ -628,3 +628,110 @@ func TestSeal_ReusesExistingObjectForNewPath(t *testing.T) {
 		t.Errorf("SizeEncrypted = %d, want %d (existing object's size)", entry.SizeEncrypted, len(before))
 	}
 }
+
+// TestRotate_ObjectsButNoManifest covers that Rotate shares the actionable
+// no-manifest diagnosis: a cloned store whose manifest was dropped by a
+// gitignore should steer the user to the recovery steps from every entry
+// point, not just Unseal/Verify.
+func TestRotate_ObjectsButNoManifest(t *testing.T) {
+	identity, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+
+	sealDir := t.TempDir()
+	objStore := NewObjectStore(sealDir)
+	if err := objStore.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := objStore.Write(ContentHash([]byte("x")), []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig(t.TempDir(), sealDir)
+
+	_, err = Rotate(cfg, identity, identity.Recipient(), false, nil)
+	if err == nil {
+		t.Fatal("Rotate() with objects but no manifest returned nil error")
+	}
+	for _, want := range []string{"manifest.json", "add -f"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q is missing %q", err.Error(), want)
+		}
+	}
+}
+
+// TestSeal_RefusesFullWipeOnEmptyScan guards against interpreting a zero-file
+// scan as "delete everything": a scan that finds nothing while the manifest is
+// populated is almost always a wrong claude_dir (a synced foreign path, a
+// typo'd --claude-dir), and sealing it would commit a manifest with every
+// entry deleted — which a later unseal propagates as real deletions.
+func TestSeal_RefusesFullWipeOnEmptyScan(t *testing.T) {
+	claudeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("# hi\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	sealDir := t.TempDir()
+	identity, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+	if _, err := Seal(config.DefaultConfig(claudeDir, sealDir), identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	badCfg := config.DefaultConfig(filepath.Join(t.TempDir(), "missing", ".claude"), sealDir)
+	_, err = Seal(badCfg, identity.Recipient(), false, nil)
+	if err == nil {
+		t.Fatal("Seal() against a missing claude dir wiped the manifest without error")
+	}
+
+	m, loadErr := LoadManifest(sealDir)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if len(m.Files) == 0 {
+		t.Error("manifest was emptied despite the refusal")
+	}
+}
+
+// TestSeal_NoOpLeavesManifestUntouched guards that a seal with no content
+// changes does not rewrite manifest.json: Save refreshes sealed_at, and a
+// timestamp-only rewrite hands the staged-diff commit gate a manifest change,
+// turning every scheduled no-op seal into a commit.
+func TestSeal_NoOpLeavesManifestUntouched(t *testing.T) {
+	claudeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("# hi\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	sealDir := t.TempDir()
+	identity, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("first Seal() error: %v", err)
+	}
+	manifestPath := filepath.Join(sealDir, "manifest.json")
+	info1, err := os.Stat(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := Seal(cfg, identity.Recipient(), false, nil)
+	if err != nil {
+		t.Fatalf("second Seal() error: %v", err)
+	}
+	if stats.HasChanges() {
+		t.Fatalf("second seal saw changes: %s", stats)
+	}
+
+	info2, err := os.Stat(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info1.ModTime().Equal(info2.ModTime()) {
+		t.Error("no-op seal rewrote manifest.json (sealed_at churn)")
+	}
+}

@@ -91,15 +91,16 @@ func (g *Git) Add(paths ...string) error {
 }
 
 // AddAll stages all changes, then force-stages the seal store payload —
-// manifest.json and the objects/ blobs. A user's global gitignore
+// manifest.json, the objects/ blobs, and seal.toml. A user's global gitignore
 // (core.excludesFile) can otherwise silently drop files an unseal needs:
-// without the manifest there is no relPath->hash mapping, and without the
-// objects the manifest's hashes point at blobs that were never committed.
+// without the manifest there is no relPath->hash mapping, without the objects
+// the manifest's hashes point at blobs that were never committed, and without
+// the config a clone fails before it even looks for the manifest.
 func (g *Git) AddAll() error {
 	if _, err := g.run("add", "."); err != nil {
 		return err
 	}
-	for _, p := range []string{"manifest.json", "objects"} {
+	for _, p := range []string{"manifest.json", "objects", "seal.toml"} {
 		if _, err := os.Stat(filepath.Join(g.dir, p)); err != nil {
 			continue
 		}

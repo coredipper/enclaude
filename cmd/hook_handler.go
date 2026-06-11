@@ -152,22 +152,18 @@ func handleSessionEnd() error {
 		return nil
 	}
 
-	// Commit if changes
-	if stats.HasChanges() {
-		git := gitops.New(sealDir)
-		if err := git.AddAll(); err != nil {
-			logHook("git add warning: %v", err)
-			return nil
-		}
-		msg := fmt.Sprintf("seal: auto-seal from %s (%s)",
-			cfg.Seal.DeviceID, stats)
-		if err := git.Commit(msg); err != nil {
-			logHook("git commit warning: %v", err)
-			return nil
-		}
+	msg := fmt.Sprintf("seal: auto-seal from %s (%s)",
+		cfg.Seal.DeviceID, stats)
+	committed, err := commitSealStore(sealDir, msg)
+	if err != nil {
+		logHook("git warning: %v", err)
+		return nil
+	}
 
-		// Push if auto-push enabled
-		if cfg.Sync.AutoPush && git.HasRemote("origin") {
+	// Push if auto-push enabled
+	if committed && cfg.Sync.AutoPush {
+		git := gitops.New(sealDir)
+		if git.HasRemote("origin") {
 			branch, _ := git.CurrentBranch()
 			if _, out, err := git.Push("origin", branch); err != nil {
 				logHook("push warning: %v (%s)", err, out)

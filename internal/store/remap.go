@@ -53,6 +53,9 @@ type RemapPlan struct {
 	SrcKey   string // encoded project segment, e.g. "-home-daniel-core-enclaude"
 	DstKey   string // local segment, e.g. "-Users-bob-core-enclaude"
 	Accepted bool
+	// Pinned marks a plan resolved by a device-local override. Pins are
+	// settled decisions, so interactive unseals apply them without re-asking.
+	Pinned bool
 }
 
 // homeDir returns the local machine's home directory: the parent of ~/.claude
@@ -157,7 +160,7 @@ func PlanRemap(m *Manifest, dstHomeEnc, originHomeEnc string, overrides map[stri
 		seen[seg] = true
 
 		if dst, ok := overrides[seg]; ok {
-			plans = append(plans, RemapPlan{SrcKey: seg, DstKey: dst, Accepted: true})
+			plans = append(plans, RemapPlan{SrcKey: seg, DstKey: dst, Accepted: true, Pinned: true})
 			continue
 		}
 
@@ -270,8 +273,9 @@ func candidateBetter(a, b remapCandidate) bool {
 
 // remapManifest rewrites foreign project keys in m into an effective local
 // manifest per mode. Returns m unchanged for RemapOff or when nothing foreign
-// is found. In RemapInteractive it consults DefaultRemapResolver and persists
-// the resulting decisions as device-local overrides so later unseals are silent.
+// is found. In RemapInteractive it consults DefaultRemapResolver for the plans
+// not already settled by a pin, then persists every decision — including
+// declines — as device-local overrides so later unseals are silent.
 func remapManifest(m *Manifest, cfg *config.Config, mode RemapMode) (*Manifest, error) {
 	if mode == RemapOff {
 		return m, nil
@@ -286,25 +290,41 @@ func remapManifest(m *Manifest, cfg *config.Config, mode RemapMode) (*Manifest, 
 		return m, nil
 	}
 	if mode == RemapInteractive && DefaultRemapResolver != nil {
-		resolved, err := DefaultRemapResolver(plans)
-		if err != nil {
-			return m, err
+		var ask, settled []RemapPlan
+		for _, p := range plans {
+			if p.Pinned {
+				settled = append(settled, p)
+			} else {
+				ask = append(ask, p)
+			}
 		}
-		plans = resolved
-		persistOverrides(cfg.Seal.SealDir, plans)
+		if len(ask) > 0 {
+			resolved, err := DefaultRemapResolver(ask)
+			if err != nil {
+				return m, err
+			}
+			persistOverrides(cfg.Seal.SealDir, resolved)
+			settled = append(settled, resolved...)
+		}
+		plans = settled
 	}
 	return ApplyRemap(m, plans), nil
 }
 
-// persistOverrides records the accepted plans as device-local overrides
+// persistOverrides records the resolver's decisions as device-local overrides
 // (best-effort: the remap is already applied, so a write failure only costs a
-// re-prompt next time).
+// re-prompt next time). A decline is a decision too — it pins the key to
+// itself so the next unseal doesn't re-ask.
 func persistOverrides(sealDir string, plans []RemapPlan) {
 	ov := LoadOverrides(sealDir)
 	changed := false
 	for _, p := range plans {
-		if p.Accepted && p.DstKey != "" && ov[p.SrcKey] != p.DstKey {
-			ov[p.SrcKey] = p.DstKey
+		target := p.DstKey
+		if !p.Accepted || target == "" {
+			target = p.SrcKey
+		}
+		if ov[p.SrcKey] != target {
+			ov[p.SrcKey] = target
 			changed = true
 		}
 	}
@@ -325,6 +345,10 @@ type ProjectInfo struct {
 // or foreign relative to this machine, attaching any device-local override.
 func ProjectDirs(m *Manifest, cfg *config.Config) []ProjectInfo {
 	dst := localHomeEnc(cfg)
+	var originEnc string
+	if m.OriginHome != "" {
+		originEnc = encodePath(m.OriginHome)
+	}
 	overrides := LoadOverrides(cfg.Seal.SealDir)
 	counts := map[string]int{}
 	for relPath := range m.Files {
@@ -334,15 +358,31 @@ func ProjectDirs(m *Manifest, cfg *config.Config) []ProjectInfo {
 	}
 	out := make([]ProjectInfo, 0, len(counts))
 	for seg, n := range counts {
-		prefix := encodedHomePrefix(seg)
 		out = append(out, ProjectInfo{
 			Key:      seg,
 			Files:    n,
-			Foreign:  prefix != "" && prefix != dst,
+			Foreign:  segIsForeign(seg, dst, originEnc),
 			Override: overrides[seg],
 		})
 	}
 	return out
+}
+
+// segIsForeign mirrors PlanRemap's source detection so `project list` agrees
+// with what unseal would remap: the authoritative origin home is consulted
+// first (it wins even when the local home is a boundary prefix of it, and it
+// recognizes homes the lossy heuristic can't), then already-local, then the
+// -Users/-home/-root prefix heuristic.
+func segIsForeign(seg, dstHomeEnc, originHomeEnc string) bool {
+	switch {
+	case originHomeEnc != "" && originHomeEnc != dstHomeEnc && hasEncodedPrefix(seg, originHomeEnc):
+		return true
+	case hasEncodedPrefix(seg, dstHomeEnc):
+		return false
+	default:
+		prefix := encodedHomePrefix(seg)
+		return prefix != "" && prefix != dstHomeEnc
+	}
 }
 
 // NormalizeProjectKey accepts either an absolute project path or an
