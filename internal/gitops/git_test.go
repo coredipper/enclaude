@@ -855,3 +855,33 @@ func TestAddAll_ForceStagesIgnoredSealToml(t *testing.T) {
 		t.Errorf("seal.toml was not staged despite ignore rule; git ls-files = %q", out)
 	}
 }
+
+func TestUnsafeRemoteExecution(t *testing.T) {
+	dir := t.TempDir()
+	g := New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	unsafeRemote := "ext::sh -c 'echo pwned > pwned.txt'"
+
+	// Fetch
+	if _, err := g.Fetch(unsafeRemote); err == nil || !strings.Contains(err.Error(), "ext::") {
+		t.Errorf("Fetch expected to fail on ext:: remote, got %v", err)
+	}
+
+	// Pull
+	if _, _, err := g.Pull(unsafeRemote, "main"); err == nil || !strings.Contains(err.Error(), "ext::") {
+		t.Errorf("Pull expected to fail on ext:: remote, got %v", err)
+	}
+
+	// Push
+	if _, _, err := g.Push(unsafeRemote, "main"); err == nil || !strings.Contains(err.Error(), "ext::") {
+		t.Errorf("Push expected to fail on ext:: remote, got %v", err)
+	}
+
+	// PushWithUpstream
+	if _, _, err := g.PushWithUpstream(unsafeRemote, "main"); err == nil || !strings.Contains(err.Error(), "ext::") {
+		t.Errorf("PushWithUpstream expected to fail on ext:: remote, got %v", err)
+	}
+}

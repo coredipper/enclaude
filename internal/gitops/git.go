@@ -152,6 +152,9 @@ func (g *Git) PushWithUpstream(remote, branch string) (PushStats, string, error)
 // returned string is the combined output the caller should surface on
 // error or in verbose mode.
 func (g *Git) pushWithArgs(remote, branch string, setUpstream bool) (PushStats, string, error) {
+	if err := rejectUnsafeRemoteURL(remote); err != nil {
+		return PushStats{}, "", err
+	}
 	start := time.Now()
 	stats := PushStats{}
 
@@ -189,6 +192,9 @@ func (g *Git) pushWithArgs(remote, branch string, setUpstream bool) (PushStats, 
 
 // Fetch fetches from the given remote.
 func (g *Git) Fetch(remote string) (string, error) {
+	if err := rejectUnsafeRemoteURL(remote); err != nil {
+		return "", err
+	}
 	return g.run("fetch", "--", remote)
 }
 
@@ -196,6 +202,9 @@ func (g *Git) Fetch(remote string) (string, error) {
 // summary plus the combined output (which the merge driver parser also
 // consumes for [enclaude-merge] lines on stderr).
 func (g *Git) Pull(remote, branch string) (PullStats, string, error) {
+	if err := rejectUnsafeRemoteURL(remote); err != nil {
+		return PullStats{}, "", err
+	}
 	start := time.Now()
 	stats := PullStats{}
 
