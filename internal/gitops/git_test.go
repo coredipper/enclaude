@@ -855,3 +855,85 @@ func TestAddAll_ForceStagesIgnoredSealToml(t *testing.T) {
 		t.Errorf("seal.toml was not staged despite ignore rule; git ls-files = %q", out)
 	}
 }
+
+// TestRemoteOps_RejectExtTransportFromPoisonedConfig closes the config-
+// resolution RCE vector: a remote whose URL is git's command-executing ext::
+// transport, written straight into .git/config (bypassing the guarded
+// RemoteAdd), must not run its payload when git resolves it by name during
+// fetch/pull/push. The argument-level rejectUnsafeRemoteURL guard can't catch
+// this — callers pass the remote name "origin", not the URL.
+//
+// Modern git already refuses ext:: by default, so the test sets
+// protocol.ext.allow=user in the repo config to recreate the vulnerable
+// condition (an older git, or a user who opted into ext:: globally). The fix
+// must pin protocol.ext.allow=never on git's command line, which overrides
+// that config; each op asserts the sentinel file the payload would touch
+// never appears.
+func TestRemoteOps_RejectExtTransportFromPoisonedConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		op   func(g *Git) error
+	}{
+		{"Fetch", func(g *Git) error { _, err := g.Fetch("origin"); return err }},
+		{"Pull", func(g *Git) error { _, _, err := g.Pull("origin", "main"); return err }},
+		{"Push", func(g *Git) error { _, _, err := g.Push("origin", "main"); return err }},
+		{"PushWithUpstream", func(g *Git) error { _, _, err := g.PushWithUpstream("origin", "main"); return err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			g := New(dir)
+			if err := g.Init(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := g.run("config", "user.name", "Test User"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := g.run("config", "user.email", "test@example.com"); err != nil {
+				t.Fatal(err)
+			}
+			// Recreate the vulnerable ambient policy the fix must override.
+			if _, err := g.run("config", "protocol.ext.allow", "user"); err != nil {
+				t.Fatal(err)
+			}
+			// A commit on a branch named main so push/pull have a real ref and
+			// reach the transport (where the ext payload would fire) rather than
+			// bailing earlier on a missing ref.
+			if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := g.AddAll(); err != nil {
+				t.Fatal(err)
+			}
+			if err := g.Commit("init"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := g.run("branch", "-M", "main"); err != nil {
+				t.Fatal(err)
+			}
+
+			// The payload: a self-contained executable the ext:: transport runs
+			// on connect. Pointing ext:: at one no-arg script sidesteps the
+			// transport's space-splitting of inline commands.
+			pwned := filepath.Join(dir, "PWNED")
+			helper := filepath.Join(dir, "helper.sh")
+			if err := os.WriteFile(helper, []byte("#!/bin/sh\ntouch "+pwned+"\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+
+			// Poison the config directly, as a hostile synced store would —
+			// this never passes through RemoteAdd's rejectUnsafeRemoteURL guard.
+			if _, err := g.run("config", "remote.origin.url", "ext::"+helper); err != nil {
+				t.Fatal(err)
+			}
+
+			// The op is expected to error (transport refused, or later ref
+			// negotiation fails); the security property under test is only that
+			// the payload never ran, so we don't assert on the error itself.
+			_ = tc.op(g)
+
+			if _, err := os.Stat(pwned); err == nil {
+				t.Fatalf("%s executed the ext:: payload (sentinel %s exists); protocol.ext.allow=never not applied", tc.name, pwned)
+			}
+		})
+	}
+}

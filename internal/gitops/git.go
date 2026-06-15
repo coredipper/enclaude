@@ -169,7 +169,8 @@ func (g *Git) pushWithArgs(remote, branch string, setUpstream bool) (PushStats, 
 	}
 	stats.Commits = commits
 
-	args := []string{"push", "--porcelain"}
+	// Pin ext:: off (as in Fetch) so a poisoned remote URL can't run a command.
+	args := []string{"-c", "protocol.ext.allow=never", "push", "--porcelain"}
 	if setUpstream {
 		args = append(args, "-u")
 	}
@@ -189,7 +190,11 @@ func (g *Git) pushWithArgs(remote, branch string, setUpstream bool) (PushStats, 
 
 // Fetch fetches from the given remote.
 func (g *Git) Fetch(remote string) (string, error) {
-	return g.run("fetch", "--", remote)
+	// -c protocol.ext.allow=never overrides the user's ambient git policy so a
+	// remote URL git resolves from config can't run the command-executing ext::
+	// transport. rejectUnsafeRemoteURL is the argument-level half of this guard;
+	// it can't see a name->URL resolution, so the policy is pinned here.
+	return g.run("-c", "protocol.ext.allow=never", "fetch", "--", remote)
 }
 
 // Pull pulls from the given remote and branch and returns a PullStats
@@ -207,8 +212,10 @@ func (g *Git) Pull(remote, branch string) (PullStats, string, error) {
 	// the human-friendly form, and the merge driver's stderr arrives
 	// interleaved with stdout — both ends up in the same string for the
 	// parser. Color is suppressed via -c flags. The -- separator keeps a
-	// dash-prefixed remote/branch from being parsed as a git option.
-	cmd := exec.Command(getGitPath(), append([]string{"-C", g.dir, "-c", "color.ui=never", "pull", "--"}, remote, branch)...)
+	// dash-prefixed remote/branch from being parsed as a git option, and
+	// protocol.ext.allow=never pins ext:: off (as in Fetch) so a poisoned
+	// remote URL can't run a command.
+	cmd := exec.Command(getGitPath(), append([]string{"-C", g.dir, "-c", "color.ui=never", "-c", "protocol.ext.allow=never", "pull", "--"}, remote, branch)...)
 	rawOut, err := cmd.CombinedOutput()
 	out := strings.TrimSpace(string(rawOut))
 
