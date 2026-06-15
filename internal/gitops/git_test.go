@@ -3,6 +3,7 @@ package gitops
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -993,5 +994,63 @@ func TestUnsafeRemoteExecution(t *testing.T) {
 	// PushWithUpstream
 	if _, _, err := g.PushWithUpstream(unsafeRemote, "main"); err == nil || !strings.Contains(err.Error(), "ext::") {
 		t.Errorf("PushWithUpstream expected to fail on ext:: remote, got %v", err)
+	}
+}
+
+// TestScrubExtAllowProtocol verifies the GIT_ALLOW_PROTOCOL scrub removes the
+// ext transport regardless of the variable name's case — env names are case-
+// insensitive on Windows, so a lowercase git_allow_protocol=ext would otherwise
+// slip past and re-enable ext:: — across every matching entry, while leaving
+// other protocols and unrelated variables untouched. A real-git integration
+// test can't exercise the case-insensitive path on Linux/macOS (env names are
+// case-sensitive there), so the pure scrub is asserted directly.
+func TestScrubExtAllowProtocol(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "uppercase strips ext keeps others",
+			in:   []string{"GIT_ALLOW_PROTOCOL=https:ext:ssh"},
+			want: []string{"GIT_ALLOW_PROTOCOL=https:ssh"},
+		},
+		{
+			name: "lowercase name is scrubbed (Windows)",
+			in:   []string{"git_allow_protocol=ext"},
+			want: []string{},
+		},
+		{
+			name: "mixed case name preserved, ext removed",
+			in:   []string{"Git_Allow_Protocol=ext:https"},
+			want: []string{"Git_Allow_Protocol=https"},
+		},
+		{
+			name: "ext-only entry dropped",
+			in:   []string{"PATH=/bin", "GIT_ALLOW_PROTOCOL=ext"},
+			want: []string{"PATH=/bin"},
+		},
+		{
+			name: "no ext left untouched",
+			in:   []string{"GIT_ALLOW_PROTOCOL=https:ssh"},
+			want: []string{"GIT_ALLOW_PROTOCOL=https:ssh"},
+		},
+		{
+			name: "unrelated vars pass through",
+			in:   []string{"PATH=/bin", "HOME=/root"},
+			want: []string{"PATH=/bin", "HOME=/root"},
+		},
+		{
+			name: "every matching entry scrubbed",
+			in:   []string{"GIT_ALLOW_PROTOCOL=ext:https", "git_allow_protocol=ext"},
+			want: []string{"GIT_ALLOW_PROTOCOL=https"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := scrubExtAllowProtocol(append([]string{}, tc.in...))
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("scrubExtAllowProtocol(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

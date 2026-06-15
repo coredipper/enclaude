@@ -68,25 +68,34 @@ func New(repoDir string) *Git {
 // invocations: the scrub is a no-op for local commands and can't be forgotten
 // on a remote one.
 func gitSafeEnv() []string {
-	env := os.Environ()
-	const prefix = "GIT_ALLOW_PROTOCOL="
-	for i, kv := range env {
-		if !strings.HasPrefix(kv, prefix) {
+	return scrubExtAllowProtocol(os.Environ())
+}
+
+// scrubExtAllowProtocol returns env with the ext transport removed from every
+// GIT_ALLOW_PROTOCOL entry, dropping any entry whose allowlist it empties so
+// config governs rather than denying all protocols. The variable name is
+// matched case-insensitively: on Windows env names are case-insensitive, so a
+// hostile git_allow_protocol=ext would otherwise reach git as GIT_ALLOW_PROTOCOL
+// and re-enable ext::. The original name's case is preserved.
+func scrubExtAllowProtocol(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, val, ok := strings.Cut(kv, "=")
+		if !ok || !strings.EqualFold(name, "GIT_ALLOW_PROTOCOL") {
+			out = append(out, kv)
 			continue
 		}
 		var kept []string
-		for p := range strings.SplitSeq(kv[len(prefix):], ":") {
+		for p := range strings.SplitSeq(val, ":") {
 			if p != "" && p != "ext" {
 				kept = append(kept, p)
 			}
 		}
-		if len(kept) == 0 {
-			return append(env[:i:i], env[i+1:]...)
+		if len(kept) > 0 {
+			out = append(out, name+"="+strings.Join(kept, ":"))
 		}
-		env[i] = prefix + strings.Join(kept, ":")
-		return env
 	}
-	return env
+	return out
 }
 
 // run executes a git command and returns combined output. Use this for
