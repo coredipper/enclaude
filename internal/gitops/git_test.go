@@ -856,6 +856,11 @@ func TestAddAll_ForceStagesIgnoredSealToml(t *testing.T) {
 	}
 }
 
+// TestUnsafeRemoteExecution guards the live remote operations (Fetch, Pull,
+// Push, PushWithUpstream) against an ext:: URL passed straight through as the
+// remote argument — git would otherwise run it as a shell command. Asserting
+// on our own "ext::" error string ensures the guard fires before git executes
+// anything, rather than relying on git's own (version-dependent) rejection.
 func TestUnsafeRemoteExecution(t *testing.T) {
 	dir := t.TempDir()
 	g := New(dir)

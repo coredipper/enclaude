@@ -256,8 +256,11 @@ func (g *Git) MergeAbort() error {
 // arbitrary command. ext:: runs its argument as a shell command on every
 // fetch/push, so it is a code-execution vector regardless of how safely
 // the URL is passed as a positional — the -- separator cannot neutralize
-// a valid-but-malicious positional. Called from every path that records a
-// remote URL (add and set-url) so the guard can't be bypassed by editing.
+// a valid-but-malicious positional. Called both where a remote URL is
+// recorded (add, set-url) and inline on the live operations (fetch, pull,
+// push) as defense in depth, so a URL passed straight through as an
+// argument is rejected. It cannot catch a poisoned remote.<name>.url that
+// git resolves from config — those paths pass the remote name, not the URL.
 func rejectUnsafeRemoteURL(url string) error {
 	if strings.HasPrefix(url, "ext::") {
 		return fmt.Errorf("refusing remote with ext:: URL (arbitrary command execution transport): %s", url)
