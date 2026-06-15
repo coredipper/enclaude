@@ -152,6 +152,9 @@ func (g *Git) PushWithUpstream(remote, branch string) (PushStats, string, error)
 // returned string is the combined output the caller should surface on
 // error or in verbose mode.
 func (g *Git) pushWithArgs(remote, branch string, setUpstream bool) (PushStats, string, error) {
+	if err := rejectUnsafeRemoteURL(remote); err != nil {
+		return PushStats{}, "", err
+	}
 	start := time.Now()
 	stats := PushStats{}
 
@@ -190,6 +193,9 @@ func (g *Git) pushWithArgs(remote, branch string, setUpstream bool) (PushStats, 
 
 // Fetch fetches from the given remote.
 func (g *Git) Fetch(remote string) (string, error) {
+	if err := rejectUnsafeRemoteURL(remote); err != nil {
+		return "", err
+	}
 	// -c protocol.ext.allow=never overrides the user's ambient git policy so a
 	// remote URL git resolves from config can't run the command-executing ext::
 	// transport. rejectUnsafeRemoteURL is the argument-level half of this guard;
@@ -201,6 +207,9 @@ func (g *Git) Fetch(remote string) (string, error) {
 // summary plus the combined output (which the merge driver parser also
 // consumes for [enclaude-merge] lines on stderr).
 func (g *Git) Pull(remote, branch string) (PullStats, string, error) {
+	if err := rejectUnsafeRemoteURL(remote); err != nil {
+		return PullStats{}, "", err
+	}
 	start := time.Now()
 	stats := PullStats{}
 
@@ -254,8 +263,11 @@ func (g *Git) MergeAbort() error {
 // arbitrary command. ext:: runs its argument as a shell command on every
 // fetch/push, so it is a code-execution vector regardless of how safely
 // the URL is passed as a positional — the -- separator cannot neutralize
-// a valid-but-malicious positional. Called from every path that records a
-// remote URL (add and set-url) so the guard can't be bypassed by editing.
+// a valid-but-malicious positional. Called both where a remote URL is
+// recorded (add, set-url) and inline on the live operations (fetch, pull,
+// push) as defense in depth, so a URL passed straight through as an
+// argument is rejected. It cannot catch a poisoned remote.<name>.url that
+// git resolves from config — those paths pass the remote name, not the URL.
 func rejectUnsafeRemoteURL(url string) error {
 	if strings.HasPrefix(url, "ext::") {
 		return fmt.Errorf("refusing remote with ext:: URL (arbitrary command execution transport): %s", url)
