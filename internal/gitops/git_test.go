@@ -856,6 +856,60 @@ func TestAddAll_ForceStagesIgnoredSealToml(t *testing.T) {
 	}
 }
 
+// extRemoteOps is the set of remote operations that resolve a remote by name
+// and must refuse git's command-executing ext:: transport.
+var extRemoteOps = []struct {
+	name string
+	op   func(g *Git) error
+}{
+	{"Fetch", func(g *Git) error { _, err := g.Fetch("origin"); return err }},
+	{"Pull", func(g *Git) error { _, _, err := g.Pull("origin", "main"); return err }},
+	{"Push", func(g *Git) error { _, _, err := g.Push("origin", "main"); return err }},
+	{"PushWithUpstream", func(g *Git) error { _, _, err := g.PushWithUpstream("origin", "main"); return err }},
+}
+
+// newPoisonedExtRepo returns a repo with one commit on main whose origin URL is
+// an ext:: payload that touches the returned sentinel path if git ever runs it.
+// The URL is written straight into config, bypassing RemoteAdd's guard, as a
+// hostile synced store would. A no-arg helper script sidesteps the ext::
+// transport's space-splitting of inline commands; the commit gives push/pull a
+// real ref so they reach the transport rather than bailing on a missing ref.
+func newPoisonedExtRepo(t *testing.T) (g *Git, sentinel string) {
+	t.Helper()
+	dir := t.TempDir()
+	g = New(dir)
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.name", "Test User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Commit("init"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("branch", "-M", "main"); err != nil {
+		t.Fatal(err)
+	}
+	sentinel = filepath.Join(dir, "PWNED")
+	helper := filepath.Join(dir, "helper.sh")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\ntouch "+sentinel+"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "remote.origin.url", "ext::"+helper); err != nil {
+		t.Fatal(err)
+	}
+	return g, sentinel
+}
+
 // TestRemoteOps_RejectExtTransportFromPoisonedConfig closes the config-
 // resolution RCE vector: a remote whose URL is git's command-executing ext::
 // transport, written straight into .git/config (bypassing the guarded
@@ -870,69 +924,38 @@ func TestAddAll_ForceStagesIgnoredSealToml(t *testing.T) {
 // that config; each op asserts the sentinel file the payload would touch
 // never appears.
 func TestRemoteOps_RejectExtTransportFromPoisonedConfig(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		op   func(g *Git) error
-	}{
-		{"Fetch", func(g *Git) error { _, err := g.Fetch("origin"); return err }},
-		{"Pull", func(g *Git) error { _, _, err := g.Pull("origin", "main"); return err }},
-		{"Push", func(g *Git) error { _, _, err := g.Push("origin", "main"); return err }},
-		{"PushWithUpstream", func(g *Git) error { _, _, err := g.PushWithUpstream("origin", "main"); return err }},
-	} {
+	for _, tc := range extRemoteOps {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			g := New(dir)
-			if err := g.Init(); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := g.run("config", "user.name", "Test User"); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := g.run("config", "user.email", "test@example.com"); err != nil {
-				t.Fatal(err)
-			}
+			g, sentinel := newPoisonedExtRepo(t)
 			// Recreate the vulnerable ambient policy the fix must override.
 			if _, err := g.run("config", "protocol.ext.allow", "user"); err != nil {
 				t.Fatal(err)
 			}
-			// A commit on a branch named main so push/pull have a real ref and
-			// reach the transport (where the ext payload would fire) rather than
-			// bailing earlier on a missing ref.
-			if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0644); err != nil {
-				t.Fatal(err)
-			}
-			if err := g.AddAll(); err != nil {
-				t.Fatal(err)
-			}
-			if err := g.Commit("init"); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := g.run("branch", "-M", "main"); err != nil {
-				t.Fatal(err)
-			}
-
-			// The payload: a self-contained executable the ext:: transport runs
-			// on connect. Pointing ext:: at one no-arg script sidesteps the
-			// transport's space-splitting of inline commands.
-			pwned := filepath.Join(dir, "PWNED")
-			helper := filepath.Join(dir, "helper.sh")
-			if err := os.WriteFile(helper, []byte("#!/bin/sh\ntouch "+pwned+"\n"), 0755); err != nil {
-				t.Fatal(err)
-			}
-
-			// Poison the config directly, as a hostile synced store would —
-			// this never passes through RemoteAdd's rejectUnsafeRemoteURL guard.
-			if _, err := g.run("config", "remote.origin.url", "ext::"+helper); err != nil {
-				t.Fatal(err)
-			}
-
 			// The op is expected to error (transport refused, or later ref
 			// negotiation fails); the security property under test is only that
 			// the payload never ran, so we don't assert on the error itself.
 			_ = tc.op(g)
+			if _, err := os.Stat(sentinel); err == nil {
+				t.Fatalf("%s executed the ext:: payload (sentinel %s exists); protocol.ext.allow=never not applied", tc.name, sentinel)
+			}
+		})
+	}
+}
 
-			if _, err := os.Stat(pwned); err == nil {
-				t.Fatalf("%s executed the ext:: payload (sentinel %s exists); protocol.ext.allow=never not applied", tc.name, pwned)
+// TestRemoteOps_RejectExtViaGitAllowProtocol guards the GIT_ALLOW_PROTOCOL
+// bypass: that variable is an allowlist that overrides protocol.<name>.allow
+// config — including the -c protocol.ext.allow=never the remote ops pass — so a
+// user who exports GIT_ALLOW_PROTOCOL with ext in it would otherwise re-enable
+// the command-executing ext:: transport for a poisoned remote URL. The fix must
+// strip ext from the child environment; each op asserts the payload never ran.
+func TestRemoteOps_RejectExtViaGitAllowProtocol(t *testing.T) {
+	for _, tc := range extRemoteOps {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GIT_ALLOW_PROTOCOL", "ext")
+			g, sentinel := newPoisonedExtRepo(t)
+			_ = tc.op(g)
+			if _, err := os.Stat(sentinel); err == nil {
+				t.Fatalf("%s executed the ext:: payload (sentinel %s exists); GIT_ALLOW_PROTOCOL=ext not scrubbed", tc.name, sentinel)
 			}
 		})
 	}

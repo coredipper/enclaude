@@ -57,10 +57,43 @@ func New(repoDir string) *Git {
 	return &Git{dir: repoDir}
 }
 
+// gitSafeEnv returns os.Environ with the ext transport stripped from any
+// GIT_ALLOW_PROTOCOL entry. That variable is an allowlist that overrides
+// protocol.<name>.allow config — including the -c protocol.ext.allow=never the
+// remote ops pass — so a user (or hostile parent process) exporting
+// GIT_ALLOW_PROTOCOL with ext in it could otherwise re-enable the command-
+// executing ext:: transport for a remote URL git resolves from config. If
+// stripping ext empties the allowlist the variable is dropped so config governs,
+// rather than an empty list that would deny every protocol. Applied to all git
+// invocations: the scrub is a no-op for local commands and can't be forgotten
+// on a remote one.
+func gitSafeEnv() []string {
+	env := os.Environ()
+	const prefix = "GIT_ALLOW_PROTOCOL="
+	for i, kv := range env {
+		if !strings.HasPrefix(kv, prefix) {
+			continue
+		}
+		var kept []string
+		for p := range strings.SplitSeq(kv[len(prefix):], ":") {
+			if p != "" && p != "ext" {
+				kept = append(kept, p)
+			}
+		}
+		if len(kept) == 0 {
+			return append(env[:i:i], env[i+1:]...)
+		}
+		env[i] = prefix + strings.Join(kept, ":")
+		return env
+	}
+	return env
+}
+
 // run executes a git command and returns combined output. Use this for
 // user-facing diagnostics where interleaved stdout/stderr is acceptable.
 func (g *Git) run(args ...string) (string, error) {
 	cmd := exec.Command(getGitPath(), append([]string{"-C", g.dir}, args...)...)
+	cmd.Env = gitSafeEnv()
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
@@ -71,6 +104,7 @@ func (g *Git) run(args ...string) (string, error) {
 func (g *Git) runSeparate(args ...string) (stdout, stderr string, err error) {
 	full := append([]string{"-C", g.dir, "-c", "color.ui=never"}, args...)
 	cmd := exec.Command(getGitPath(), full...)
+	cmd.Env = gitSafeEnv()
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -225,6 +259,7 @@ func (g *Git) Pull(remote, branch string) (PullStats, string, error) {
 	// protocol.ext.allow=never pins ext:: off (as in Fetch) so a poisoned
 	// remote URL can't run a command.
 	cmd := exec.Command(getGitPath(), append([]string{"-C", g.dir, "-c", "color.ui=never", "-c", "protocol.ext.allow=never", "pull", "--"}, remote, branch)...)
+	cmd.Env = gitSafeEnv()
 	rawOut, err := cmd.CombinedOutput()
 	out := strings.TrimSpace(string(rawOut))
 
