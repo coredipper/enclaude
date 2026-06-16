@@ -469,6 +469,14 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 		}
 		absPath := filepath.Join(cfg.Seal.ClaudeDir, relPath)
 
+		if !filepath.IsLocal(relPath) {
+			stats.Errors++
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  warning: skipping invalid path %s\n", relPath)
+			}
+			continue
+		}
+
 		// Fast path: check size and mtime before reading the entire file and hashing
 		if info, err := os.Stat(absPath); err == nil && entry.ModTimeNs != 0 {
 			if info.Size() == entry.SizePlaintext && info.ModTime().UnixNano() == entry.ModTimeNs {
@@ -909,6 +917,9 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 	// Try to fix missing/corrupt by re-sealing from plaintext
 	for _, path := range append(result.MissingObjects, result.CorruptObjects...) {
 		absPath := filepath.Join(cfg.Seal.ClaudeDir, path)
+		if !filepath.IsLocal(path) {
+			continue
+		}
 		plaintext, err := os.ReadFile(absPath)
 		if err != nil {
 			continue // plaintext not available

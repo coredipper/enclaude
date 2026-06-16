@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,40 @@ import (
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 )
+
+func TestUnsealPathTraversal(t *testing.T) {
+	parent := t.TempDir()
+	claudeDir := filepath.Join(parent, "claude")
+	sealDir := filepath.Join(parent, "seal")
+	os.MkdirAll(claudeDir, 0700)
+	os.MkdirAll(sealDir, 0700)
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	manifest := Manifest{
+		Version:  2,
+		DeviceID: "device-1",
+		SealedAt: time.Now().UTC().Format(time.RFC3339),
+		Files: map[string]FileEntry{
+			"../hacked.txt": {ContentHash: "fakehash"},
+		},
+	}
+	data, _ := json.Marshal(manifest)
+	os.WriteFile(filepath.Join(sealDir, "manifest.json"), data, 0644)
+
+	stats, err := Unseal(cfg, identity, false, nil)
+	if err != nil {
+		t.Fatalf("Unseal() error: %v", err)
+	}
+
+	if stats.Errors != 1 {
+		t.Errorf("expected 1 error due to path traversal, got %d", stats.Errors)
+	}
+	if _, err := os.Stat(filepath.Join(parent, "hacked.txt")); err == nil {
+		t.Error("path traversal successful, file should not exist")
+	}
+}
 
 func TestSealUnsealRoundTrip(t *testing.T) {
 	// Create source directory (simulated ~/.claude/)
