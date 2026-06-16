@@ -47,6 +47,55 @@ func TestUnsealPathTraversal(t *testing.T) {
 	}
 }
 
+// TestRepairPathTraversal guards Repair's re-seal loop against a manifest key
+// that escapes ClaudeDir ("../secret.txt"). Without the filepath.IsLocal check,
+// Repair reads the external file, encrypts it into the object store, and records
+// it in the manifest — an arbitrary-file exfiltration vector. The guard must
+// skip the entry so the external file's bytes never enter the store.
+func TestRepairPathTraversal(t *testing.T) {
+	parent := t.TempDir()
+	claudeDir := filepath.Join(parent, "claude")
+	sealDir := filepath.Join(parent, "seal")
+	os.MkdirAll(claudeDir, 0700)
+	os.MkdirAll(sealDir, 0700)
+
+	// Secret outside ClaudeDir; the manifest key "../secret.txt" resolves here.
+	secret := []byte("top secret outside claude dir")
+	if err := os.WriteFile(filepath.Join(parent, "secret.txt"), secret, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+
+	// The hash is absent from the store, so Verify flags the entry as a missing
+	// object and Repair attempts to re-seal it from plaintext.
+	manifest := Manifest{
+		Version:  2,
+		DeviceID: "device-1",
+		SealedAt: time.Now().UTC().Format(time.RFC3339),
+		Files: map[string]FileEntry{
+			"../secret.txt": {ContentHash: strings.Repeat("0", 64)},
+		},
+	}
+	data, _ := json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(sealDir, "manifest.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Repair(cfg, identity, false, false)
+	if err != nil {
+		t.Fatalf("Repair() error: %v", err)
+	}
+
+	if result.Fixed != 0 {
+		t.Errorf("traversal entry was repaired (Fixed=%d), want 0", result.Fixed)
+	}
+	if NewObjectStore(sealDir).Exists(ContentHash(secret)) {
+		t.Error("external file was read and sealed into the store — traversal not blocked")
+	}
+}
+
 func TestSealUnsealRoundTrip(t *testing.T) {
 	// Create source directory (simulated ~/.claude/)
 	claudeDir := setupTestDir(t)
