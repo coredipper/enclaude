@@ -292,8 +292,20 @@ func (g *Git) Pull(remote, branch string) (PullStats, string, error) {
 	return stats, out, err
 }
 
+// rejectUnsafeRef blocks refs that start with a dash to prevent flag
+// injection vulnerabilities when passed to git commands.
+func rejectUnsafeRef(ref string) error {
+	if strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("refusing ref starting with dash (flag injection risk): %s", ref)
+	}
+	return nil
+}
+
 // Merge merges the given ref into the current branch.
 func (g *Git) Merge(ref string) (string, error) {
+	if err := rejectUnsafeRef(ref); err != nil {
+		return "", err
+	}
 	return g.run("merge", "--", ref)
 }
 
@@ -435,11 +447,17 @@ func (g *Git) HasUpstream() bool {
 
 // ShowFileAtRef returns the contents of a file at a specific git ref.
 func (g *Git) ShowFileAtRef(ref, path string) (string, error) {
+	if err := rejectUnsafeRef(ref); err != nil {
+		return "", err
+	}
 	return g.run("show", ref+":"+path)
 }
 
 // Checkout restores files from a specific ref.
 func (g *Git) Checkout(ref string, paths ...string) (string, error) {
+	if err := rejectUnsafeRef(ref); err != nil {
+		return "", err
+	}
 	args := append([]string{"checkout", ref, "--"}, paths...)
 	return g.run(args...)
 }
