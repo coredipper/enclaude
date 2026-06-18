@@ -102,6 +102,9 @@ func fastRel(base, path string) (string, error) {
 		return ".", nil
 	}
 	if strings.HasPrefix(path, base) {
+		if len(base) > 0 && os.IsPathSeparator(base[len(base)-1]) {
+			return path[len(base):], nil
+		}
 		if len(path) > len(base) && os.IsPathSeparator(path[len(base)]) {
 			return path[len(base)+1:], nil
 		}

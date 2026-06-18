@@ -362,6 +362,54 @@ func BenchmarkMatchGlob(b *testing.B) {
 	_ = sink
 }
 
+func TestFastRel(t *testing.T) {
+	tests := []struct {
+		base string
+		path string
+		want string
+	}{
+		{"/a/b", "/a/b/c", "c"},
+		{"/a/b", "/a/b", "."},
+		{"/a/b/", "/a/b/c", "c"},
+		{"/a/b/", "/a/b/c/d", "c/d"},
+		{"/a/b", "/x/y", "../../x/y"}, // Handled by fallback
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.base+"_"+tt.path, func(t *testing.T) {
+			got, err := fastRel(tt.base, tt.path)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("fastRel(%q, %q) = %q, want %q", tt.base, tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func BenchmarkFastRel(b *testing.B) {
+	base := "/my/base/dir"
+	path := "/my/base/dir/subdir/file.txt"
+
+	b.Run("NoTrailingSlash", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, _ = fastRel(base, path)
+		}
+	})
+
+	baseSlash := "/my/base/dir/"
+	b.Run("WithTrailingSlash", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, _ = fastRel(baseSlash, path)
+		}
+	})
+}
+
 // BenchmarkScannerMatchesAny_ExactPattern exercises the wildcard-free fast path
 // in matchesAnyCompiled, where each pattern short-circuits to a string compare
 // instead of filepath.Match — the path the exact-pattern optimization targets,
