@@ -1,4 +1,8 @@
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# Strip the leading "v" so local builds match goreleaser's {{.Version}}
+# (bare semver). Grouping keeps the "dev" fallback firing on git failure —
+# sed always exits 0, so it must run after the fallback resolves, not in
+# the same pipeline.
+VERSION := $(shell { git describe --tags --always --dirty 2>/dev/null || echo "dev"; } | sed 's/^v//')
 LDFLAGS := -ldflags "-X github.com/coredipper/enclaude/cmd.Version=$(VERSION)"
 
 .PHONY: build install test lint clean
