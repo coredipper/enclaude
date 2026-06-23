@@ -81,19 +81,37 @@ func localHomeEnc(cfg *config.Config) string {
 // project segment ("-Users-bob", "-home-daniel", "-root"), or "" if the segment
 // doesn't start with a recognizable home.
 func encodedHomePrefix(seg string) string {
-	parts := strings.Split(seg, "-") // leading "-" yields an empty parts[0]
-	if len(parts) < 2 {
+	if len(seg) == 0 || seg[0] != '-' {
 		return ""
 	}
-	switch parts[1] {
-	case "Users", "home":
-		if len(parts) >= 3 && parts[2] != "" {
-			return "-" + parts[1] + "-" + parts[2]
+	s := seg[1:]
+	if strings.HasPrefix(s, "root") {
+		if len(s) == 4 || s[4] == '-' {
+			return "-root"
 		}
-	case "root":
-		return "-root"
 	}
-	return ""
+
+	var p1, p2 string
+	if strings.HasPrefix(s, "Users-") {
+		p1 = "Users"
+		p2 = s[6:]
+	} else if strings.HasPrefix(s, "home-") {
+		p1 = "home"
+		p2 = s[5:]
+	} else {
+		return ""
+	}
+
+	i := strings.IndexByte(p2, '-')
+	if i >= 0 {
+		p2 = p2[:i]
+	}
+
+	if p2 == "" {
+		return ""
+	}
+
+	return "-" + p1 + "-" + p2
 }
 
 // hasEncodedPrefix reports whether s begins with prefix at an encoded-segment
