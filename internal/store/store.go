@@ -583,25 +583,25 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 	sem := make(chan struct{}, numWorkers)
 
 	for _, f := range files {
+		// Fast path: if size and nanosecond mtime match manifest, assume
+		// unchanged and reuse the stored hash. ModTimeNs==0 means the
+		// manifest was written by a version that didn't store nanosecond
+		// precision — fall through to hashing in that case rather than
+		// trust an unset value.
+		if entry, ok := manifest.Files[f.RelPath]; ok && entry.ModTimeNs != 0 {
+			if entry.SizePlaintext == f.Size && entry.ModTimeNs == f.ModTimeNs {
+				mu.Lock()
+				current.Files[f.RelPath] = entry
+				mu.Unlock()
+				continue
+			}
+		}
+
 		wg.Add(1)
 		go func(f ScanResult) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-
-			// Fast path: if size and nanosecond mtime match manifest, assume
-			// unchanged and reuse the stored hash. ModTimeNs==0 means the
-			// manifest was written by a version that didn't store nanosecond
-			// precision — fall through to hashing in that case rather than
-			// trust an unset value.
-			if entry, ok := manifest.Files[f.RelPath]; ok && entry.ModTimeNs != 0 {
-				if entry.SizePlaintext == f.Size && entry.ModTimeNs == f.ModTimeNs {
-					mu.Lock()
-					current.Files[f.RelPath] = entry
-					mu.Unlock()
-					return
-				}
-			}
 
 			data, err := os.ReadFile(f.AbsPath)
 			if err != nil {
@@ -670,22 +670,22 @@ func UnsealStatus(cfg *config.Config, opts ...UnsealOption) (*DiffResult, error)
 	sem := make(chan struct{}, numWorkers)
 
 	for _, f := range files {
+		// Fast path: see Status above for the rationale and the
+		// ModTimeNs==0 guard against legacy manifests.
+		if entry, ok := manifest.Files[f.RelPath]; ok && entry.ModTimeNs != 0 {
+			if entry.SizePlaintext == f.Size && entry.ModTimeNs == f.ModTimeNs {
+				mu.Lock()
+				onDisk[f.RelPath] = entry.ContentHash
+				mu.Unlock()
+				continue
+			}
+		}
+
 		wg.Add(1)
 		go func(f ScanResult) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-
-			// Fast path: see Status above for the rationale and the
-			// ModTimeNs==0 guard against legacy manifests.
-			if entry, ok := manifest.Files[f.RelPath]; ok && entry.ModTimeNs != 0 {
-				if entry.SizePlaintext == f.Size && entry.ModTimeNs == f.ModTimeNs {
-					mu.Lock()
-					onDisk[f.RelPath] = entry.ContentHash
-					mu.Unlock()
-					return
-				}
-			}
 
 			data, err := os.ReadFile(f.AbsPath)
 			if err != nil {
