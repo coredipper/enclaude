@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,12 +33,16 @@ type keyRotateDeps struct {
 //  2. Generate new key.
 //  3. Persist the new key.
 //  4. Re-encrypt all sealed objects to the new key.
+//  5. If re-encryption fails, restore the old key.
 //
 // Persisting BEFORE re-encryption is critical: if storeKey prompts the user
 // (file fallback) and they cancel, or any other persistence failure occurs,
 // the seal store is still intact under the old key. Doing rotate first and
 // then storeKey would leave every object encrypted to a key that exists only
 // in process memory if storeKey fails — total data loss.
+//
+// Rotation itself now fails before overwriting on missing/corrupt objects, so a
+// rotation error after the new key was persisted must put the old key back.
 func rotateKeyCore(d keyRotateDeps) (old, new *age.X25519Identity, rotated int, err error) {
 	old, err = d.loadKey()
 	if err != nil {
@@ -55,7 +60,12 @@ func rotateKeyCore(d keyRotateDeps) (old, new *age.X25519Identity, rotated int, 
 	}
 	rotated, err = d.rotate(old, new.Recipient())
 	if err != nil {
-		err = fmt.Errorf("rotation: %w", err)
+		rotationErr := fmt.Errorf("rotation: %w", err)
+		if restoreErr := d.storeKey(old); restoreErr != nil {
+			err = errors.Join(rotationErr, fmt.Errorf("restoring old key after rotation failure: %w", restoreErr))
+			return
+		}
+		err = rotationErr
 		return
 	}
 	return

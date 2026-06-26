@@ -122,6 +122,67 @@ func TestRotateKeyCore_StoreFailureSkipsRotate(t *testing.T) {
 	}
 }
 
+// TestRotateKeyCore_RotationFailureRestoresOldKey guards the failure mode
+// introduced by fail-fast rotation preflight: if the new key was persisted but
+// rotation then fails before rewriting objects, key storage must be put back to
+// the old key so existing objects remain decryptable.
+func TestRotateKeyCore_RotationFailureRestoresOldKey(t *testing.T) {
+	tr := &rotateTrace{}
+	oldID := mustGen(t)
+	newID := mustGen(t)
+	rotateErr := errors.New("missing object")
+	var stored []*age.X25519Identity
+
+	deps := keyRotateDeps{
+		loadKey: func() (*age.X25519Identity, error) {
+			tr.record("loadKey")
+			return oldID, nil
+		},
+		genKey: func() (*age.X25519Identity, error) {
+			tr.record("genKey")
+			return newID, nil
+		},
+		storeKey: func(id *age.X25519Identity) error {
+			tr.record("storeKey:" + id.Recipient().String())
+			stored = append(stored, id)
+			return nil
+		},
+		rotate: func(*age.X25519Identity, *age.X25519Recipient) (int, error) {
+			tr.record("rotate")
+			return 0, rotateErr
+		},
+	}
+
+	_, _, _, err := rotateKeyCore(deps)
+	if err == nil {
+		t.Fatal("expected rotation error")
+	}
+	if !errors.Is(err, rotateErr) {
+		t.Fatalf("error chain missing rotateErr: %v", err)
+	}
+	if len(stored) != 2 {
+		t.Fatalf("stored %d keys, want new then old", len(stored))
+	}
+	if stored[0] != newID || stored[1] != oldID {
+		t.Fatalf("store order = %v, want new identity then old identity", stored)
+	}
+	want := []string{
+		"loadKey",
+		"genKey",
+		"storeKey:" + newID.Recipient().String(),
+		"rotate",
+		"storeKey:" + oldID.Recipient().String(),
+	}
+	if len(tr.calls) != len(want) {
+		t.Fatalf("call sequence = %v, want %v", tr.calls, want)
+	}
+	for i, c := range want {
+		if tr.calls[i] != c {
+			t.Fatalf("call[%d] = %q, want %q (full: %v)", i, tr.calls[i], c, tr.calls)
+		}
+	}
+}
+
 // TestRotateKeyCore_LoadFailureSkipsEverything is a sanity guard: if loadKey
 // fails there is nothing to rotate and no new key to persist.
 func TestRotateKeyCore_LoadFailureSkipsEverything(t *testing.T) {

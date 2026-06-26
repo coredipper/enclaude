@@ -197,7 +197,7 @@ func TestPurgePlaintextCompletedSessionsOnly(t *testing.T) {
 		t.Fatalf("Seal() error: %v", err)
 	}
 
-	stats, err := PurgePlaintext(cfg, PurgeCompletedSessions, false, false, false)
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, false, false, false)
 	if err != nil {
 		t.Fatalf("PurgePlaintext() error: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestPurgePlaintextSkipsChangedPlaintext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stats, err := PurgePlaintext(cfg, PurgeCompletedSessions, false, false, false)
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, false, false, false)
 	if err != nil {
 		t.Fatalf("PurgePlaintext() error: %v", err)
 	}
@@ -246,6 +246,78 @@ func TestPurgePlaintextSkipsChangedPlaintext(t *testing.T) {
 	}
 	if _, err := os.Stat(sessionPath); err != nil {
 		t.Fatalf("changed plaintext should remain: %v", err)
+	}
+}
+
+// TestPurgePlaintextRequiresRecoverableObject verifies purge will not remove
+// plaintext when the encrypted object is absent, because that plaintext may be
+// the only usable copy.
+func TestPurgePlaintextRequiresRecoverableObject(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	manifest, _ := LoadManifest(sealDir)
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	hash := manifest.Files[sessionRel].ContentHash
+	if err := os.Remove(NewObjectStore(sealDir).ObjectPath(hash)); err != nil {
+		t.Fatalf("removing sealed object: %v", err)
+	}
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, false, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if stats.Removed != 0 || stats.Errors != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 error", stats)
+	}
+	if _, err := os.Stat(filepath.Join(claudeDir, sessionRel)); err != nil {
+		t.Fatalf("plaintext should remain when sealed object is missing: %v", err)
+	}
+}
+
+// TestPurgePlaintextSkipsSymlink verifies purge never follows a managed path
+// symlink, which would let --shred overwrite a target outside ClaudeDir.
+func TestPurgePlaintextSkipsSymlink(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionPath := filepath.Join(claudeDir, "projects/proj-a/abc123.jsonl")
+	targetPath := filepath.Join(t.TempDir(), "outside.jsonl")
+	targetContent := []byte(`{"type":"user"}`)
+	if err := os.WriteFile(targetPath, targetContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(sessionPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetPath, sessionPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, true, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if stats.Removed != 0 || stats.Skipped != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 skipped", stats)
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || !bytes.Equal(got, targetContent) {
+		t.Fatalf("symlink target changed or unreadable: got %q err=%v", got, err)
+	}
+	if info, err := os.Lstat(sessionPath); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlink should remain skipped: info=%v err=%v", info, err)
 	}
 }
 

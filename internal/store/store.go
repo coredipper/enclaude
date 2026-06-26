@@ -773,7 +773,7 @@ func (s PurgePlaintextStats) Multiline(indent string, dryRun bool) string {
 
 // PurgePlaintext removes plaintext copies only when the on-disk bytes still
 // match the sealed manifest hash. Unsynced edits are skipped, not deleted.
-func PurgePlaintext(cfg *config.Config, scope PurgeScope, shred, dryRun, verbose bool) (PurgePlaintextStats, error) {
+func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope, shred, dryRun, verbose bool) (PurgePlaintextStats, error) {
 	var stats PurgePlaintextStats
 
 	manifest, err := LoadManifest(cfg.Seal.SealDir)
@@ -785,6 +785,7 @@ func PurgePlaintext(cfg *config.Config, scope PurgeScope, shred, dryRun, verbose
 	}
 
 	activeSessions := activeSessionIDs(cfg.Seal.ClaudeDir)
+	objects := NewObjectStore(cfg.Seal.SealDir)
 	paths := make([]string, 0, len(manifest.Files))
 	for path := range manifest.Files {
 		paths = append(paths, path)
@@ -807,7 +808,7 @@ func PurgePlaintext(cfg *config.Config, scope PurgeScope, shred, dryRun, verbose
 		}
 
 		absPath := filepath.Join(cfg.Seal.ClaudeDir, relPath)
-		info, err := os.Stat(absPath)
+		info, err := os.Lstat(absPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				stats.Missing++
@@ -819,7 +820,14 @@ func PurgePlaintext(cfg *config.Config, scope PurgeScope, shred, dryRun, verbose
 			}
 			continue
 		}
-		if info.IsDir() {
+		if info.Mode()&os.ModeSymlink != 0 {
+			stats.Skipped++
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  warning: skipping symlink %s\n", relPath)
+			}
+			continue
+		}
+		if !info.Mode().IsRegular() {
 			stats.Skipped++
 			continue
 		}
@@ -836,6 +844,13 @@ func PurgePlaintext(cfg *config.Config, scope PurgeScope, shred, dryRun, verbose
 			stats.Skipped++
 			if verbose {
 				fmt.Fprintf(os.Stderr, "  warning: skipping changed plaintext %s\n", relPath)
+			}
+			continue
+		}
+		if err := verifySealedObject(objects, identity, entry); err != nil {
+			stats.Errors++
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  warning: sealed object for %s is not recoverable: %v\n", relPath, err)
 			}
 			continue
 		}
@@ -872,6 +887,21 @@ func PurgePlaintext(cfg *config.Config, scope PurgeScope, shred, dryRun, verbose
 	}
 
 	return stats, nil
+}
+
+func verifySealedObject(store *ObjectStore, identity age.Identity, entry FileEntry) error {
+	encrypted, err := store.Read(entry.ContentHash)
+	if err != nil {
+		return fmt.Errorf("read object: %w", err)
+	}
+	plaintext, err := crypto.Decrypt(encrypted, identity)
+	if err != nil {
+		return fmt.Errorf("decrypt object: %w", err)
+	}
+	if ContentHash(plaintext) != entry.ContentHash {
+		return fmt.Errorf("hash mismatch")
+	}
+	return nil
 }
 
 func purgeSelects(relPath string, entry FileEntry, scope PurgeScope, active map[string]bool) bool {

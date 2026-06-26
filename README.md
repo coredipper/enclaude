@@ -47,7 +47,7 @@ This isn't a bug — it's how every AI coding assistant works today (Cursor, Cop
 
 **Git** provides the transport layer. The encrypted objects are committed to a git repository, giving you full version history, branching, and remote sync — all on encrypted data. Your plaintext never leaves your machine; only encrypted blobs are pushed.
 
-**Purge plaintext** is explicit. By default, `seal` leaves `~/.claude/` in place because Claude Code reads it directly. After sealing, you can remove sealed plaintext session transcripts with `enclaude purge-plaintext`; add `--shred` to overwrite before removal.
+**Purge plaintext** is explicit. By default, `seal` leaves `~/.claude/` in place because Claude Code reads it directly. After sealing, you can remove sealed plaintext session transcripts with `enclaude purge-plaintext`; it removes only files whose encrypted object is recoverable. Add `--shred` to overwrite before removal.
 
 ### Why This Works Well for Claude Data
 
@@ -177,7 +177,7 @@ This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. Wh
 | `hooks remove` | Remove auto-sync hooks |
 | `hooks status` | Check if hooks are installed |
 | `readme-regen` | Regenerate and commit README.md in the seal store |
-| `purge-plaintext` | Remove sealed completed session plaintext (`--all-managed` removes every matching managed file) |
+| `purge-plaintext` | Remove sealed completed session plaintext (`--all-managed` removes every recoverable matching managed file) |
 | `project list` | List synced project dirs and their local/foreign status |
 | `project map <src> <target>` | Pin a device-local project-key remap |
 | `project unmap <src>` | Remove a pinned project-key remap |
@@ -252,7 +252,7 @@ patterns = [
 ### Honest Limitations
 
 - **During an active Claude Code session, plaintext exists on disk.** This is unavoidable — Claude Code reads `~/.claude/` directly and cannot be modified to read encrypted data. Use OS-level disk encryption (FileVault, BitLocker, LUKS) for protection during sessions.
-- **Sealing does not delete plaintext.** Run `enclaude purge-plaintext` after a successful seal to remove completed session transcripts, or `enclaude purge-plaintext --all-managed --yes` if you intentionally want to remove every managed plaintext file that still matches the sealed manifest.
+- **Sealing does not delete plaintext.** Run `enclaude purge-plaintext` after a successful seal to remove completed session transcripts, or `enclaude purge-plaintext --all-managed --yes` if you intentionally want to remove every managed plaintext file that still matches a recoverable sealed object.
 - **Application-level encryption does not protect against a malicious process running as your user.** If an attacker has code execution as your user, they can read decrypted files in memory or extract the key from the keychain. OS-level protections are the right defense layer here.
 - **The encryption key must be shared across devices.** This is inherent to any cross-device sync scheme. Use `key export` to save your key in a password manager, or rely on the passphrase-encrypted `key.age.backup` that travels with the repo.
 - **Cross-device project remap only fixes the directory key.** `unseal` places a synced project where the local Claude Code looks (see [Projects Across Devices](#projects-across-devices)), but absolute paths embedded inside transcripts (cwd, tool arguments) keep the originating machine's paths as a historical record — they are not rewritten, and Claude Code does not re-execute them.

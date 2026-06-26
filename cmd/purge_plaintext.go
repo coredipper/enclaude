@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/coredipper/enclaude/internal/config"
+	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/session"
 	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
@@ -21,7 +22,7 @@ var purgePlaintextCmd = &cobra.Command{
 	Long: `Remove plaintext files from the Claude directory after they have been
 sealed into the encrypted store. By default this removes only completed
 top-level session JSONL files. Use --all-managed to remove every managed file
-whose on-disk bytes still match the sealed manifest entry.`,
+whose on-disk bytes still match a recoverable encrypted object.`,
 	RunE: runPurgePlaintext,
 }
 
@@ -53,10 +54,18 @@ func runPurgePlaintext(cmd *cobra.Command, args []string) error {
 		scope = store.PurgeAllManaged
 	}
 
+	identity, source, err := crypto.LoadKey()
+	if err != nil {
+		return fmt.Errorf("loading key: %w", err)
+	}
+	if flagVerbose {
+		fmt.Printf("Using key from %s\n", source)
+	}
+
 	if flagDryRun {
 		fmt.Println("(dry run — showing plaintext files that would be purged)")
 	}
-	stats, err := store.PurgePlaintext(cfg, scope, purgeShred, flagDryRun, flagVerbose)
+	stats, err := store.PurgePlaintext(cfg, identity, scope, purgeShred, flagDryRun, flagVerbose)
 	if err != nil {
 		return fmt.Errorf("purging plaintext: %w", err)
 	}
