@@ -176,7 +176,7 @@ passphrase-encrypted key file under {TICK}$XDG_CONFIG_HOME/enclaude/{TICK}.
    {TICK}git clone <remote-url> ~/.enclaude{TICK}
 3. Import your private key (into the OS keyring if available, otherwise into
    a local passphrase-encrypted key file):
-   {TICK}enclaude key import{TICK}
+   {TICK}enclaude key import --from-backup{TICK} (or {TICK}enclaude key import keyfile.txt{TICK})
 4. Decrypt and restore your Claude files:
    {TICK}enclaude unseal{TICK}
 
@@ -186,7 +186,7 @@ If both the OS keyring entry and the local key file are lost, restore from the
 passphrase-encrypted backup committed to this repository:
 
 {FENCE}
-enclaude key recover key.age.backup
+enclaude key import --from-backup
 {FENCE}
 
 You will be prompted for the passphrase you set during {TICK}enclaude init{TICK}.

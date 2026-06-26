@@ -40,10 +40,14 @@ func TestBuildReadme(t *testing.T) {
 			contains: []string{
 				"## Restoring on a new machine",
 				"## Key recovery",
+				"enclaude key import --from-backup",
 				"## Daily use",
 				"enclaude unseal",
 				"enclaude seal",
 				"Private keys are never stored here",
+			},
+			absent: []string{
+				"enclaude key recover",
 			},
 		},
 		{

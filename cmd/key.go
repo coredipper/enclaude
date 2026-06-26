@@ -204,7 +204,9 @@ var keyRotateCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("creating backup: %w", err)
 			}
-			os.WriteFile(filepath.Join(sealDir, "key.age.backup"), backup, 0600)
+			if err := os.WriteFile(filepath.Join(sealDir, "key.age.backup"), backup, 0600); err != nil {
+				return fmt.Errorf("writing key backup: %w", err)
+			}
 			fmt.Println("  Key backup updated.")
 		}
 

@@ -47,13 +47,15 @@ This isn't a bug — it's how every AI coding assistant works today (Cursor, Cop
 
 **Git** provides the transport layer. The encrypted objects are committed to a git repository, giving you full version history, branching, and remote sync — all on encrypted data. Your plaintext never leaves your machine; only encrypted blobs are pushed.
 
+**Purge plaintext** is explicit. By default, `seal` leaves `~/.claude/` in place because Claude Code reads it directly. After sealing, you can remove sealed plaintext session transcripts with `enclaude purge-plaintext`; add `--shred` to overwrite before removal.
+
 ### Why This Works Well for Claude Data
 
 Claude Code's session files have a property that makes sync trivial: **they're immutable after completion**. Once a session ends, its JSONL file is never modified again. This means:
 
 - Two devices that both ran sessions produce different files with different hashes — no conflicts, just union both sides
 - `history.jsonl` is append-only — merging two diverged copies means deduplicating lines and sorting by timestamp
-- Memory files are small markdown — standard 3-way text merge handles them
+- Memory files are small markdown — a simple whole-file 3-way merge handles one-sided edits and writes conflict markers if both sides changed
 
 The only files that need real merge logic are `settings.json` (last-write-wins) and `history.jsonl` (line-level dedup). Everything else is either immutable or trivially mergeable.
 
@@ -148,6 +150,7 @@ This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. Wh
 | `sync` | Seal + pull + push (the daily driver) |
 | `push` | Seal + git push |
 | `pull` | Git pull + merge + unseal |
+| `purge-plaintext` | Remove sealed completed session plaintext from `~/.claude/` |
 
 ### History & Recovery
 | Command | Description |
@@ -174,6 +177,7 @@ This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. Wh
 | `hooks remove` | Remove auto-sync hooks |
 | `hooks status` | Check if hooks are installed |
 | `readme-regen` | Regenerate and commit README.md in the seal store |
+| `purge-plaintext` | Remove sealed completed session plaintext (`--all-managed` removes every matching managed file) |
 | `project list` | List synced project dirs and their local/foreign status |
 | `project map <src> <target>` | Pin a device-local project-key remap |
 | `project unmap <src>` | Remove a pinned project-key remap |
@@ -184,11 +188,11 @@ When pulling from a remote, two devices may have diverged. `enclaude` uses a cus
 
 | Strategy | Used for | How it works |
 |----------|----------|-------------|
-| `immutable` | Session JSONL files | Union both sides — sessions never change after completion, so there are no conflicts |
+| `immutable` | Session JSONL files | Distinct session files are unioned at the manifest level; if the same path diverges unexpectedly, keep the local side |
 | `jsonl_dedup` | `history.jsonl` | Parse each line as JSON, SHA-256 hash for dedup, sort by timestamp |
 | `sessions_index` | `sessions-index.json` | Deduplicate entries by `sessionId`, preserving unique sessions from both sides |
 | `last_write_wins` | `settings.json`, `stats-cache.json` | Keep whichever version has the later modification time |
-| `text_merge` | Memory files (`.md`) | Standard 3-way text merge; conflict markers if both sides changed |
+| `text_merge` | Memory files (`.md`) | Simple whole-file 3-way merge; conflict markers if both sides changed |
 
 These strategies are configurable per path pattern in `seal.toml`.
 
@@ -237,7 +241,7 @@ patterns = [
 
 | Property | Status |
 |----------|--------|
-| Encrypted at rest (between sessions) | Yes — completed session plaintext can be shredded after seal |
+| Encrypted at rest (between sessions) | Encrypted copy yes; local plaintext remains unless you run `purge-plaintext` |
 | Encrypted at rest (during active session) | No — Claude Code requires plaintext to function |
 | Encrypted in transit (git push/pull) | Yes — only age-encrypted blobs are pushed |
 | Key storage | OS keychain (macOS Keychain, Linux secret-service, Windows Credential Manager) |
@@ -248,6 +252,7 @@ patterns = [
 ### Honest Limitations
 
 - **During an active Claude Code session, plaintext exists on disk.** This is unavoidable — Claude Code reads `~/.claude/` directly and cannot be modified to read encrypted data. Use OS-level disk encryption (FileVault, BitLocker, LUKS) for protection during sessions.
+- **Sealing does not delete plaintext.** Run `enclaude purge-plaintext` after a successful seal to remove completed session transcripts, or `enclaude purge-plaintext --all-managed --yes` if you intentionally want to remove every managed plaintext file that still matches the sealed manifest.
 - **Application-level encryption does not protect against a malicious process running as your user.** If an attacker has code execution as your user, they can read decrypted files in memory or extract the key from the keychain. OS-level protections are the right defense layer here.
 - **The encryption key must be shared across devices.** This is inherent to any cross-device sync scheme. Use `key export` to save your key in a password manager, or rely on the passphrase-encrypted `key.age.backup` that travels with the repo.
 - **Cross-device project remap only fixes the directory key.** `unseal` places a synced project where the local Claude Code looks (see [Projects Across Devices](#projects-across-devices)), but absolute paths embedded inside transcripts (cwd, tool arguments) keep the originating machine's paths as a historical record — they are not rewritten, and Claude Code does not re-execute them.
@@ -295,4 +300,3 @@ Your full Claude Code history, memory, and settings appear on the new device, en
 ## License
 
 MIT
-

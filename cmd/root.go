@@ -25,8 +25,9 @@ var rootCmd = &cobra.Command{
 	Use:   "enclaude",
 	Short: "Encrypted git-like sync for ~/.claude/",
 	Long: `enclaude provides age-encrypted, git-backed, JSONL-aware sync
-for your Claude Code session data. It encrypts your conversation history,
-settings, and memory at rest and syncs them across devices with version history.`,
+for your Claude Code session data. It stores encrypted copies of your
+conversation history, settings, and memory in a git-backed seal store and syncs
+them across devices with version history.`,
 	Version: Version,
 }
 

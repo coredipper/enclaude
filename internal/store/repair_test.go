@@ -276,6 +276,67 @@ func TestRotateReEncrypts(t *testing.T) {
 	}
 }
 
+// TestRotateMissingObjectFailsWithoutPartialOverwrite guards rotation's
+// all-or-nothing preflight: if any referenced object is missing, no already
+// readable object should be overwritten to the new key.
+func TestRotateMissingObjectFailsWithoutPartialOverwrite(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	oldIdentity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, oldIdentity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
+	var keepHash, missingHash string
+	for _, entry := range manifest.Files {
+		if keepHash == "" {
+			keepHash = entry.ContentHash
+			continue
+		}
+		if entry.ContentHash != keepHash {
+			missingHash = entry.ContentHash
+			break
+		}
+	}
+	if keepHash == "" || missingHash == "" {
+		t.Fatal("test needs at least two unique objects")
+	}
+	keepBefore, err := store.Read(keepHash)
+	if err != nil {
+		t.Fatalf("reading keep object: %v", err)
+	}
+	if err := os.Remove(store.ObjectPath(missingHash)); err != nil {
+		t.Fatalf("removing missing object: %v", err)
+	}
+
+	newIdentity, _ := crypto.GenerateKey()
+	rotated, err := Rotate(cfg, oldIdentity, newIdentity.Recipient(), false, nil)
+	if err == nil {
+		t.Fatal("expected Rotate() to fail when an object is missing")
+	}
+	if rotated != 0 {
+		t.Fatalf("rotated = %d, want 0 before preflight failure", rotated)
+	}
+
+	keepAfter, err := store.Read(keepHash)
+	if err != nil {
+		t.Fatalf("reading keep object after failed rotate: %v", err)
+	}
+	if !bytes.Equal(keepAfter, keepBefore) {
+		t.Fatal("failed rotation overwrote an object before preflight completed")
+	}
+	if _, err := crypto.Decrypt(keepAfter, oldIdentity); err != nil {
+		t.Fatalf("old key should still decrypt untouched object: %v", err)
+	}
+	if _, err := crypto.Decrypt(keepAfter, newIdentity); err == nil {
+		t.Fatal("new key should not decrypt object after failed rotation")
+	}
+}
+
 // TestVerifyNoManifest verifies Verify fails with "no manifest found" when
 // the seal store has no manifest yet.
 func TestVerifyNoManifest(t *testing.T) {

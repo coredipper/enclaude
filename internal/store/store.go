@@ -2,11 +2,13 @@ package store
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -360,6 +362,18 @@ func activeSessionIDs(claudeDir string) map[string]bool {
 // isSessionPath matches the on-disk shape of a Claude session transcript.
 func isSessionPath(relPath string) bool {
 	return strings.HasPrefix(relPath, "projects/") && strings.HasSuffix(relPath, ".jsonl")
+}
+
+// isTopLevelSessionPath narrows isSessionPath to Claude transcript files at
+// projects/<project>/<session>.jsonl. Nested JSONL files, such as subagent
+// logs, are managed data but not purged by the completed-session default.
+func isTopLevelSessionPath(relPath string) bool {
+	_, sub, ok := splitProjectKey(relPath)
+	if !ok || sub == "" || !strings.HasSuffix(sub, ".jsonl") {
+		return false
+	}
+	name := strings.TrimPrefix(sub, "/")
+	return name != "" && !strings.Contains(name, "/")
 }
 
 // unsealFile decrypts a single file and writes it to the claude directory.
@@ -722,6 +736,158 @@ func UnsealStatus(cfg *config.Config, opts ...UnsealOption) (*DiffResult, error)
 	return &result, nil
 }
 
+// PurgeScope controls which sealed plaintext files are removed from claudeDir.
+type PurgeScope int
+
+const (
+	// PurgeCompletedSessions removes only completed top-level session JSONLs.
+	PurgeCompletedSessions PurgeScope = iota
+	// PurgeAllManaged removes every managed file whose on-disk bytes still
+	// match the sealed manifest entry. Callers should gate this carefully.
+	PurgeAllManaged
+)
+
+// PurgePlaintextStats describes a plaintext purge run.
+type PurgePlaintextStats struct {
+	Candidates int
+	Removed    int
+	Missing    int
+	Skipped    int
+	Errors     int
+	Bytes      int64
+}
+
+func (s PurgePlaintextStats) String() string {
+	return fmt.Sprintf("%d candidates: %d removed, %d missing, %d skipped, %d errors",
+		s.Candidates, s.Removed, s.Missing, s.Skipped, s.Errors)
+}
+
+func (s PurgePlaintextStats) Multiline(indent string, dryRun bool) string {
+	action := "removed"
+	if dryRun {
+		action = "would remove"
+	}
+	return fmt.Sprintf("%s%d candidates: %d %s (%s), %d missing, %d skipped, %d errors",
+		indent, s.Candidates, s.Removed, action, FormatSize(s.Bytes), s.Missing, s.Skipped, s.Errors)
+}
+
+// PurgePlaintext removes plaintext copies only when the on-disk bytes still
+// match the sealed manifest hash. Unsynced edits are skipped, not deleted.
+func PurgePlaintext(cfg *config.Config, scope PurgeScope, shred, dryRun, verbose bool) (PurgePlaintextStats, error) {
+	var stats PurgePlaintextStats
+
+	manifest, err := LoadManifest(cfg.Seal.SealDir)
+	if err != nil {
+		return stats, fmt.Errorf("loading manifest: %w", err)
+	}
+	if manifest == nil {
+		return stats, noManifestErr(cfg.Seal.SealDir)
+	}
+
+	activeSessions := activeSessionIDs(cfg.Seal.ClaudeDir)
+	paths := make([]string, 0, len(manifest.Files))
+	for path := range manifest.Files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	for _, relPath := range paths {
+		entry := manifest.Files[relPath]
+		if !purgeSelects(relPath, entry, scope, activeSessions) {
+			continue
+		}
+		stats.Candidates++
+
+		if !filepath.IsLocal(relPath) {
+			stats.Errors++
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  warning: skipping invalid path %s\n", relPath)
+			}
+			continue
+		}
+
+		absPath := filepath.Join(cfg.Seal.ClaudeDir, relPath)
+		info, err := os.Stat(absPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				stats.Missing++
+				continue
+			}
+			stats.Errors++
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  warning: cannot stat %s: %v\n", relPath, err)
+			}
+			continue
+		}
+		if info.IsDir() {
+			stats.Skipped++
+			continue
+		}
+
+		plaintext, err := os.ReadFile(absPath)
+		if err != nil {
+			stats.Errors++
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  warning: cannot read %s: %v\n", relPath, err)
+			}
+			continue
+		}
+		if ContentHash(plaintext) != entry.ContentHash {
+			stats.Skipped++
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  warning: skipping changed plaintext %s\n", relPath)
+			}
+			continue
+		}
+
+		stats.Bytes += int64(len(plaintext))
+		if dryRun {
+			stats.Removed++
+			if verbose {
+				fmt.Printf("  [purge] %s (%s)\n", relPath, FormatSize(int64(len(plaintext))))
+			}
+			continue
+		}
+
+		if shred {
+			err = crypto.ShredFile(absPath)
+		} else {
+			err = os.Remove(absPath)
+		}
+		if err != nil {
+			stats.Errors++
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  warning: cannot purge %s: %v\n", relPath, err)
+			}
+			continue
+		}
+		stats.Removed++
+		if verbose {
+			fmt.Printf("  [purge] %s (%s)\n", relPath, FormatSize(int64(len(plaintext))))
+		}
+		dir := filepath.Dir(absPath)
+		if dir != cfg.Seal.ClaudeDir {
+			_ = os.Remove(dir)
+		}
+	}
+
+	return stats, nil
+}
+
+func purgeSelects(relPath string, entry FileEntry, scope PurgeScope, active map[string]bool) bool {
+	switch scope {
+	case PurgeCompletedSessions:
+		return isTopLevelSessionPath(relPath) && entry.SessionComplete
+	case PurgeAllManaged:
+		if isSessionPath(relPath) && !isSessionCompleteFor(relPath, active) {
+			return false
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 // ResolveMergeStrategy finds the merge strategy for a file based on glob patterns.
 func ResolveMergeStrategy(relPath string, strategies map[string]string) string {
 	strategy, _ := ResolveMergeStrategyWithPattern(relPath, strategies)
@@ -1030,54 +1196,122 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 		return 0, noManifestErr(sealDir)
 	}
 
-	total := len(manifest.Files)
-	rotated := 0
-	i := 0
+	hashes := uniqueManifestHashes(manifest)
+	total := len(hashes)
+	tmpDir, err := os.MkdirTemp(sealDir, ".rotate-*")
+	if err != nil {
+		return 0, fmt.Errorf("creating rotation staging dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	newRoot := filepath.Join(tmpDir, "new")
+	oldRoot := filepath.Join(tmpDir, "old")
 
-	for path, entry := range manifest.Files {
+	for i, hash := range hashes {
 		i++
 		if progress != nil {
-			progress(i, total, path)
+			progress(i, total, hash)
 		}
 
-		encrypted, err := store.Read(entry.ContentHash)
+		encrypted, err := store.Read(hash)
 		if err != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: cannot read %s: %v\n", path, err)
-			}
-			continue
+			return 0, fmt.Errorf("reading object %s: %w", shortHash(hash), err)
 		}
 
 		plaintext, err := crypto.Decrypt(encrypted, oldIdentity)
 		if err != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: cannot decrypt %s: %v\n", path, err)
-			}
-			continue
+			return 0, fmt.Errorf("decrypting object %s: %w", shortHash(hash), err)
 		}
 
 		newEncrypted, err := crypto.Encrypt(plaintext, newRecipient)
 		if err != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: cannot re-encrypt %s: %v\n", path, err)
+			return 0, fmt.Errorf("re-encrypting object %s: %w", shortHash(hash), err)
+		}
+
+		if err := writeStagedObject(newRoot, hash, newEncrypted); err != nil {
+			return 0, fmt.Errorf("staging rotated object %s: %w", shortHash(hash), err)
+		}
+		if err := writeStagedObject(oldRoot, hash, encrypted); err != nil {
+			return 0, fmt.Errorf("staging rollback object %s: %w", shortHash(hash), err)
+		}
+	}
+
+	applied := make([]string, 0, len(hashes))
+	for _, hash := range hashes {
+		data, err := os.ReadFile(stagedObjectPath(newRoot, hash))
+		if err != nil {
+			return len(applied), fmt.Errorf("reading staged object %s: %w", shortHash(hash), err)
+		}
+		if err := store.Write(hash, data); err != nil {
+			rollbackErr := rollbackRotatedObjects(store, oldRoot, applied)
+			if rollbackErr != nil {
+				return len(applied), errors.Join(
+					fmt.Errorf("applying rotated object %s: %w", shortHash(hash), err),
+					fmt.Errorf("rollback failed: %w", rollbackErr),
+				)
 			}
-			continue
+			return len(applied), fmt.Errorf("applying rotated object %s: %w", shortHash(hash), err)
 		}
-
-		// Overwrite in place — content hash stays the same
-		if err := store.Write(entry.ContentHash, newEncrypted); err != nil {
-			continue
+		applied = append(applied, hash)
+		if verbose {
+			fmt.Printf("  [rotate] %s\n", shortHash(hash))
 		}
-
-		rotated++
 	}
 
 	// Save manifest (updates SealedAt timestamp)
 	if err := manifest.Save(sealDir); err != nil {
-		return rotated, fmt.Errorf("saving manifest: %w", err)
+		return len(applied), fmt.Errorf("saving manifest: %w", err)
 	}
 
-	return rotated, nil
+	return len(applied), nil
+}
+
+func uniqueManifestHashes(manifest *Manifest) []string {
+	seen := make(map[string]bool, len(manifest.Files))
+	for _, entry := range manifest.Files {
+		if entry.ContentHash != "" {
+			seen[entry.ContentHash] = true
+		}
+	}
+	hashes := make([]string, 0, len(seen))
+	for hash := range seen {
+		hashes = append(hashes, hash)
+	}
+	sort.Strings(hashes)
+	return hashes
+}
+
+func stagedObjectPath(root, hash string) string {
+	return filepath.Join(root, hash[:2], hash[2:]+".age")
+}
+
+func writeStagedObject(root, hash string, data []byte) error {
+	path := stagedObjectPath(root, hash)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
+}
+
+func rollbackRotatedObjects(store *ObjectStore, oldRoot string, hashes []string) error {
+	var errs []error
+	for _, hash := range hashes {
+		data, err := os.ReadFile(stagedObjectPath(oldRoot, hash))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read backup %s: %w", shortHash(hash), err))
+			continue
+		}
+		if err := store.Write(hash, data); err != nil {
+			errs = append(errs, fmt.Errorf("restore %s: %w", shortHash(hash), err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func shortHash(hash string) string {
+	if len(hash) < 16 {
+		return hash
+	}
+	return hash[:16]
 }
 
 // FormatSize formats a byte count as a human-readable string.

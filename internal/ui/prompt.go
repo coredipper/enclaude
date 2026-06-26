@@ -58,7 +58,7 @@ func ReadPassphrase(prompt string, confirm bool) (string, error) {
 func ReadPassphraseOptional(prompt string) (string, error) {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
-		return "", fmt.Errorf("cannot prompt for passphrase: stdin is not a terminal")
+		return "", nil
 	}
 	fmt.Fprint(os.Stderr, prompt)
 	pw, err := term.ReadPassword(fd)

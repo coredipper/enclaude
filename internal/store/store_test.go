@@ -184,6 +184,71 @@ func TestSealUnsealRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPurgePlaintextCompletedSessionsOnly verifies the default purge scope
+// removes only sealed top-level completed session transcripts, leaving history,
+// memory, settings, and nested subagent JSONL files in place.
+func TestPurgePlaintextCompletedSessionsOnly(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	stats, err := PurgePlaintext(cfg, PurgeCompletedSessions, false, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if stats.Removed != 1 {
+		t.Fatalf("Removed = %d, want 1 (%s)", stats.Removed, stats)
+	}
+
+	if _, err := os.Stat(filepath.Join(claudeDir, "projects/proj-a/abc123.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("top-level session still exists or stat failed unexpectedly: %v", err)
+	}
+	for _, rel := range []string{
+		"history.jsonl",
+		"settings.json",
+		"projects/proj-a/memory/MEMORY.md",
+		"projects/proj-a/subagents/agent-abc.jsonl",
+	} {
+		if _, err := os.Stat(filepath.Join(claudeDir, rel)); err != nil {
+			t.Fatalf("%s should remain after completed-session purge: %v", rel, err)
+		}
+	}
+}
+
+// TestPurgePlaintextSkipsChangedPlaintext guards against deleting unsynced
+// edits: a candidate file must still hash to the sealed manifest entry.
+func TestPurgePlaintextSkipsChangedPlaintext(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionPath := filepath.Join(claudeDir, "projects/proj-a/abc123.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"type":"user","message":"unsynced"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := PurgePlaintext(cfg, PurgeCompletedSessions, false, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if stats.Removed != 0 || stats.Skipped != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 skipped", stats)
+	}
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Fatalf("changed plaintext should remain: %v", err)
+	}
+}
+
 func TestSealIdempotent(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
