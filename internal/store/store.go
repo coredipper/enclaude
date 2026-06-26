@@ -808,8 +808,15 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 		}
 
 		absPath := filepath.Join(cfg.Seal.ClaudeDir, relPath)
-		info, err := os.Lstat(absPath)
+		info, err := lstatNoSymlinkComponents(cfg.Seal.ClaudeDir, relPath)
 		if err != nil {
+			if errors.Is(err, errPathHasSymlink) {
+				stats.Skipped++
+				if verbose {
+					fmt.Fprintf(os.Stderr, "  warning: skipping symlinked path %s\n", relPath)
+				}
+				continue
+			}
 			if os.IsNotExist(err) {
 				stats.Missing++
 				continue
@@ -817,13 +824,6 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 			stats.Errors++
 			if verbose {
 				fmt.Fprintf(os.Stderr, "  warning: cannot stat %s: %v\n", relPath, err)
-			}
-			continue
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			stats.Skipped++
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  warning: skipping symlink %s\n", relPath)
 			}
 			continue
 		}
@@ -887,6 +887,36 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 	}
 
 	return stats, nil
+}
+
+var errPathHasSymlink = errors.New("path contains symlink")
+
+func lstatNoSymlinkComponents(root, relPath string) (os.FileInfo, error) {
+	clean := filepath.Clean(relPath)
+	if clean == "." {
+		return nil, fmt.Errorf("empty path")
+	}
+
+	current := root
+	var info os.FileInfo
+	for _, part := range strings.Split(clean, string(os.PathSeparator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		var err error
+		info, err = os.Lstat(current)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, errPathHasSymlink
+		}
+	}
+	if info == nil {
+		return nil, fmt.Errorf("empty path")
+	}
+	return info, nil
 }
 
 func verifySealedObject(store *ObjectStore, identity age.Identity, entry FileEntry) error {
@@ -1220,17 +1250,17 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 
 	manifest, err := LoadManifest(sealDir)
 	if err != nil {
-		return 0, fmt.Errorf("loading manifest: %w", err)
+		return 0, rotationStoreUnchangedError(fmt.Errorf("loading manifest: %w", err))
 	}
 	if manifest == nil {
-		return 0, noManifestErr(sealDir)
+		return 0, rotationStoreUnchangedError(noManifestErr(sealDir))
 	}
 
 	hashes := uniqueManifestHashes(manifest)
 	total := len(hashes)
 	tmpDir, err := os.MkdirTemp(sealDir, ".rotate-*")
 	if err != nil {
-		return 0, fmt.Errorf("creating rotation staging dir: %w", err)
+		return 0, rotationStoreUnchangedError(fmt.Errorf("creating rotation staging dir: %w", err))
 	}
 	defer os.RemoveAll(tmpDir)
 	newRoot := filepath.Join(tmpDir, "new")
@@ -1244,24 +1274,24 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 
 		encrypted, err := store.Read(hash)
 		if err != nil {
-			return 0, fmt.Errorf("reading object %s: %w", shortHash(hash), err)
+			return 0, rotationStoreUnchangedError(fmt.Errorf("reading object %s: %w", shortHash(hash), err))
 		}
 
 		plaintext, err := crypto.Decrypt(encrypted, oldIdentity)
 		if err != nil {
-			return 0, fmt.Errorf("decrypting object %s: %w", shortHash(hash), err)
+			return 0, rotationStoreUnchangedError(fmt.Errorf("decrypting object %s: %w", shortHash(hash), err))
 		}
 
 		newEncrypted, err := crypto.Encrypt(plaintext, newRecipient)
 		if err != nil {
-			return 0, fmt.Errorf("re-encrypting object %s: %w", shortHash(hash), err)
+			return 0, rotationStoreUnchangedError(fmt.Errorf("re-encrypting object %s: %w", shortHash(hash), err))
 		}
 
 		if err := writeStagedObject(newRoot, hash, newEncrypted); err != nil {
-			return 0, fmt.Errorf("staging rotated object %s: %w", shortHash(hash), err)
+			return 0, rotationStoreUnchangedError(fmt.Errorf("staging rotated object %s: %w", shortHash(hash), err))
 		}
 		if err := writeStagedObject(oldRoot, hash, encrypted); err != nil {
-			return 0, fmt.Errorf("staging rollback object %s: %w", shortHash(hash), err)
+			return 0, rotationStoreUnchangedError(fmt.Errorf("staging rollback object %s: %w", shortHash(hash), err))
 		}
 	}
 
@@ -1269,17 +1299,24 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 	for _, hash := range hashes {
 		data, err := os.ReadFile(stagedObjectPath(newRoot, hash))
 		if err != nil {
-			return len(applied), fmt.Errorf("reading staged object %s: %w", shortHash(hash), err)
+			rollbackErr := rollbackRotatedObjects(store, oldRoot, applied)
+			if rollbackErr != nil {
+				return len(applied), errors.Join(
+					fmt.Errorf("reading staged object %s: %w", shortHash(hash), err),
+					fmt.Errorf("rollback failed: %w", rollbackErr),
+				)
+			}
+			return len(applied), rotationStoreUnchangedError(fmt.Errorf("reading staged object %s: %w", shortHash(hash), err))
 		}
 		if err := store.Write(hash, data); err != nil {
-			rollbackErr := rollbackRotatedObjects(store, oldRoot, applied)
+			rollbackErr := rollbackRotatedObjects(store, oldRoot, append(applied, hash))
 			if rollbackErr != nil {
 				return len(applied), errors.Join(
 					fmt.Errorf("applying rotated object %s: %w", shortHash(hash), err),
 					fmt.Errorf("rollback failed: %w", rollbackErr),
 				)
 			}
-			return len(applied), fmt.Errorf("applying rotated object %s: %w", shortHash(hash), err)
+			return len(applied), rotationStoreUnchangedError(fmt.Errorf("applying rotated object %s: %w", shortHash(hash), err))
 		}
 		applied = append(applied, hash)
 		if verbose {
@@ -1293,6 +1330,21 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 	}
 
 	return len(applied), nil
+}
+
+// ErrRotationStoreUnchanged marks a rotation failure whose object writes either
+// never started or were fully rolled back. When callers already persisted a new
+// key before Rotate, this error means the old key should be restored.
+var ErrRotationStoreUnchanged = errors.New("rotation left object store encrypted with old key")
+
+// IsRotationStoreUnchanged reports whether a rotation error left the object
+// store decryptable with the old key.
+func IsRotationStoreUnchanged(err error) bool {
+	return errors.Is(err, ErrRotationStoreUnchanged)
+}
+
+func rotationStoreUnchangedError(err error) error {
+	return fmt.Errorf("%w: %w", ErrRotationStoreUnchanged, err)
 }
 
 func uniqueManifestHashes(manifest *Manifest) []string {

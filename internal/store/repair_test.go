@@ -318,6 +318,9 @@ func TestRotateMissingObjectFailsWithoutPartialOverwrite(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Rotate() to fail when an object is missing")
 	}
+	if !IsRotationStoreUnchanged(err) {
+		t.Fatalf("missing-object rotate error should be old-key-safe: %v", err)
+	}
 	if rotated != 0 {
 		t.Fatalf("rotated = %d, want 0 before preflight failure", rotated)
 	}

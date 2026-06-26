@@ -321,6 +321,53 @@ func TestPurgePlaintextSkipsSymlink(t *testing.T) {
 	}
 }
 
+// TestPurgePlaintextSkipsSymlinkedParent verifies purge rejects symlinks in
+// every managed path component, not only the final file.
+func TestPurgePlaintextSkipsSymlinkedParent(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	sessionPath := filepath.Join(claudeDir, sessionRel)
+	sessionContent, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outsideDir := t.TempDir()
+	targetPath := filepath.Join(outsideDir, "abc123.jsonl")
+	if err := os.WriteFile(targetPath, sessionContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	projDir := filepath.Join(claudeDir, "projects/proj-a")
+	if err := os.RemoveAll(projDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDir, projDir); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, true, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if stats.Removed != 0 || stats.Skipped != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 skipped", stats)
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || !bytes.Equal(got, sessionContent) {
+		t.Fatalf("symlink target changed or unreadable: got %q err=%v", got, err)
+	}
+	if info, err := os.Lstat(projDir); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("project directory symlink should remain skipped: info=%v err=%v", info, err)
+	}
+}
+
 func TestSealIdempotent(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()

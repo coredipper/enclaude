@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"github.com/coredipper/enclaude/internal/store"
 )
 
 // trace records the order of side-effects so tests can assert that storeKey
@@ -149,13 +150,16 @@ func TestRotateKeyCore_RotationFailureRestoresOldKey(t *testing.T) {
 		},
 		rotate: func(*age.X25519Identity, *age.X25519Recipient) (int, error) {
 			tr.record("rotate")
-			return 0, rotateErr
+			return 0, errors.Join(store.ErrRotationStoreUnchanged, rotateErr)
 		},
 	}
 
 	_, _, _, err := rotateKeyCore(deps)
 	if err == nil {
 		t.Fatal("expected rotation error")
+	}
+	if !errors.Is(err, store.ErrRotationStoreUnchanged) {
+		t.Fatalf("error chain missing ErrRotationStoreUnchanged: %v", err)
 	}
 	if !errors.Is(err, rotateErr) {
 		t.Fatalf("error chain missing rotateErr: %v", err)
@@ -172,6 +176,62 @@ func TestRotateKeyCore_RotationFailureRestoresOldKey(t *testing.T) {
 		"storeKey:" + newID.Recipient().String(),
 		"rotate",
 		"storeKey:" + oldID.Recipient().String(),
+	}
+	if len(tr.calls) != len(want) {
+		t.Fatalf("call sequence = %v, want %v", tr.calls, want)
+	}
+	for i, c := range want {
+		if tr.calls[i] != c {
+			t.Fatalf("call[%d] = %q, want %q (full: %v)", i, tr.calls[i], c, tr.calls)
+		}
+	}
+}
+
+// TestRotateKeyCore_RotationFailureKeepsNewKeyWhenStoreMayHaveChanged
+// verifies late or ambiguous rotation errors do not restore the old key. If
+// object writes may have survived, the newly persisted key is the safer state.
+func TestRotateKeyCore_RotationFailureKeepsNewKeyWhenStoreMayHaveChanged(t *testing.T) {
+	tr := &rotateTrace{}
+	oldID := mustGen(t)
+	newID := mustGen(t)
+	rotateErr := errors.New("saving manifest")
+	var stored []*age.X25519Identity
+
+	deps := keyRotateDeps{
+		loadKey: func() (*age.X25519Identity, error) {
+			tr.record("loadKey")
+			return oldID, nil
+		},
+		genKey: func() (*age.X25519Identity, error) {
+			tr.record("genKey")
+			return newID, nil
+		},
+		storeKey: func(id *age.X25519Identity) error {
+			tr.record("storeKey:" + id.Recipient().String())
+			stored = append(stored, id)
+			return nil
+		},
+		rotate: func(*age.X25519Identity, *age.X25519Recipient) (int, error) {
+			tr.record("rotate")
+			return 2, rotateErr
+		},
+	}
+
+	_, _, _, err := rotateKeyCore(deps)
+	if err == nil {
+		t.Fatal("expected rotation error")
+	}
+	if !errors.Is(err, rotateErr) {
+		t.Fatalf("error chain missing rotateErr: %v", err)
+	}
+	if len(stored) != 1 || stored[0] != newID {
+		t.Fatalf("stored = %v, want only new identity", stored)
+	}
+	want := []string{
+		"loadKey",
+		"genKey",
+		"storeKey:" + newID.Recipient().String(),
+		"rotate",
 	}
 	if len(tr.calls) != len(want) {
 		t.Fatalf("call sequence = %v, want %v", tr.calls, want)
