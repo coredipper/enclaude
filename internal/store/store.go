@@ -920,6 +920,9 @@ var purgeAfterPathCheck = func(string) {}
 // purgeBeforeQuarantine is a test hook for exercising final remove races.
 var purgeBeforeQuarantine = func(string) {}
 
+// purgeAfterQuarantine is a test hook for exercising post-quarantine errors.
+var purgeAfterQuarantine = func(string, *os.File) {}
+
 func lstatNoSymlinkComponents(root *os.Root, relPath string) (os.FileInfo, error) {
 	clean := filepath.Clean(relPath)
 	if clean == "." {
@@ -983,6 +986,7 @@ func purgeOpenRootedFile(root *os.Root, relPath string, f *os.File, info os.File
 		_ = f.Close()
 		return err
 	}
+	purgeAfterQuarantine(relPath, f)
 
 	if shred {
 		err = shredOpenFile(f, relPath, info.Size())
@@ -990,6 +994,9 @@ func purgeOpenRootedFile(root *os.Root, relPath string, f *os.File, info os.File
 		err = f.Close()
 	}
 	if err != nil {
+		if cleanupErr := cleanupQuarantinedRootedFile(root, relPath, tombstone, tombDir, info); cleanupErr != nil {
+			return errors.Join(err, cleanupErr)
+		}
 		return err
 	}
 	if err := root.Remove(tombstone); err != nil {
@@ -1033,6 +1040,34 @@ func quarantineRootedSameFile(root *os.Root, relPath string, expected os.FileInf
 		return tombstone, tombDir, nil
 	}
 	return "", "", fmt.Errorf("creating unique purge tombstone")
+}
+
+func cleanupQuarantinedRootedFile(root *os.Root, relPath, tombstone, tombDir string, expected os.FileInfo) error {
+	tombInfo, err := root.Lstat(tombstone)
+	if err != nil {
+		if os.IsNotExist(err) {
+			_ = root.Remove(tombDir)
+			return nil
+		}
+		return fmt.Errorf("checking quarantined %s: %w", relPath, err)
+	}
+	if !tombInfo.Mode().IsRegular() || !os.SameFile(expected, tombInfo) {
+		return errPathChanged
+	}
+
+	if err := root.Link(tombstone, relPath); err == nil {
+		if err := root.Remove(tombstone); err != nil {
+			return fmt.Errorf("removing quarantined %s after restore: %w", relPath, err)
+		}
+		_ = root.Remove(tombDir)
+		return nil
+	}
+
+	if err := root.Remove(tombstone); err != nil {
+		return fmt.Errorf("cleaning quarantined %s: %w", relPath, err)
+	}
+	_ = root.Remove(tombDir)
+	return nil
 }
 
 func randomPurgeSuffix() (string, error) {

@@ -525,6 +525,58 @@ func TestPurgePlaintextRejectsFinalRemovePathSwap(t *testing.T) {
 	}
 }
 
+func TestPurgePlaintextRestoresAfterPostQuarantineFailure(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	sessionPath := filepath.Join(claudeDir, sessionRel)
+	original, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	originalHook := purgeAfterQuarantine
+	closed := false
+	purgeAfterQuarantine = func(relPath string, f *os.File) {
+		if closed || relPath != sessionRel {
+			return
+		}
+		closed = true
+		if err := f.Close(); err != nil {
+			t.Fatalf("closing quarantined file in hook: %v", err)
+		}
+	}
+	t.Cleanup(func() { purgeAfterQuarantine = originalHook })
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, false, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if !closed {
+		t.Fatal("test hook did not run")
+	}
+	if stats.Removed != 0 || stats.Errors != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 error", stats)
+	}
+	if got, err := os.ReadFile(sessionPath); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("original file was not restored: got %q err=%v", got, err)
+	}
+	matches, err := filepath.Glob(filepath.Join(claudeDir, "projects/proj-a/.enclaude-purge-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("left purge tombstone directories: %v", matches)
+	}
+}
+
 func TestSealIdempotent(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
