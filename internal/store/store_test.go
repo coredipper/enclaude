@@ -480,6 +480,51 @@ func TestPurgePlaintextShredRejectsInRootPathSwap(t *testing.T) {
 	}
 }
 
+func TestPurgePlaintextRejectsFinalRemovePathSwap(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	sessionPath := filepath.Join(claudeDir, sessionRel)
+	replacement := []byte(`{"type":"user","message":"replacement"}`)
+
+	originalHook := purgeBeforeQuarantine
+	swapped := false
+	purgeBeforeQuarantine = func(relPath string) {
+		if swapped || relPath != sessionRel {
+			return
+		}
+		swapped = true
+		if err := os.Remove(sessionPath); err != nil {
+			t.Fatalf("removing original during purge race: %v", err)
+		}
+		if err := os.WriteFile(sessionPath, replacement, 0600); err != nil {
+			t.Fatalf("writing replacement during purge race: %v", err)
+		}
+	}
+	t.Cleanup(func() { purgeBeforeQuarantine = originalHook })
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, false, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if !swapped {
+		t.Fatal("test hook did not run")
+	}
+	if stats.Removed != 0 || stats.Errors != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 error", stats)
+	}
+	if got, err := os.ReadFile(sessionPath); err != nil || !bytes.Equal(got, replacement) {
+		t.Fatalf("replacement file changed or unreadable: got %q err=%v", got, err)
+	}
+}
+
 func TestSealIdempotent(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()

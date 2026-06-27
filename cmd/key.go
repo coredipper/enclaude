@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -97,15 +98,50 @@ func writeRotationRecoveryKeys(old, new *age.X25519Identity) (string, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", fmt.Errorf("creating recovery key directory: %w", err)
 	}
-	path := filepath.Join(dir, "key-rotation-recovery-"+time.Now().UTC().Format("20060102T150405Z")+".txt")
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	var lastErr error
+	for range 16 {
+		suffix, err := randomHex(8)
+		if err != nil {
+			return "", err
+		}
+		path := filepath.Join(dir, "key-rotation-recovery-"+stamp+"-"+suffix+".txt")
+		if err := writeRotationRecoveryKeysFile(path, old, new); err == nil {
+			return path, nil
+		} else if !os.IsExist(err) {
+			return "", err
+		} else {
+			lastErr = err
+		}
+	}
+	return "", fmt.Errorf("creating unique recovery key file: %w", lastErr)
+}
+
+func writeRotationRecoveryKeysFile(path string, old, new *age.X25519Identity) error {
 	content := "# enclaude emergency key rotation recovery\n" +
 		"# Keep this file private. The store may need either key until repair completes.\n" +
 		"old=" + old.String() + "\n" +
 		"new=" + new.String() + "\n"
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
-		return "", fmt.Errorf("writing recovery key file: %w", err)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("creating recovery key file: %w", err)
 	}
-	return path, nil
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("writing recovery key file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing recovery key file: %w", err)
+	}
+	return nil
+}
+
+func randomHex(n int) (string, error) {
+	buf := make([]byte, n)
+	if _, err := cryptorand.Read(buf); err != nil {
+		return "", fmt.Errorf("reading random bytes: %w", err)
+	}
+	return fmt.Sprintf("%x", buf), nil
 }
 
 var keyCmd = &cobra.Command{

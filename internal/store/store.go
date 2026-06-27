@@ -888,29 +888,7 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 			continue
 		}
 
-		if shred {
-			err = shredOpenFile(file, relPath, fileInfo.Size())
-			if err == nil {
-				err = ensureRootedSameFile(root, relPath, fileInfo)
-			}
-			if err == nil {
-				err = root.Remove(relPath)
-			}
-		} else {
-			err = ensureRootedSameFile(root, relPath, fileInfo)
-			closeErr := file.Close()
-			if err == nil {
-				err = closeErr
-			}
-			if err != nil {
-				stats.Errors++
-				if verbose {
-					fmt.Fprintf(os.Stderr, "  warning: cannot purge %s: %v\n", relPath, err)
-				}
-				continue
-			}
-			err = root.Remove(relPath)
-		}
+		err = purgeOpenRootedFile(root, relPath, file, fileInfo, shred)
 		if err != nil {
 			stats.Errors++
 			if verbose {
@@ -938,6 +916,9 @@ var (
 
 // purgeAfterPathCheck is a test hook for exercising path-swap races.
 var purgeAfterPathCheck = func(string) {}
+
+// purgeBeforeQuarantine is a test hook for exercising final remove races.
+var purgeBeforeQuarantine = func(string) {}
 
 func lstatNoSymlinkComponents(root *os.Root, relPath string) (os.FileInfo, error) {
 	clean := filepath.Clean(relPath)
@@ -993,6 +974,73 @@ func ensureRootedSameFile(root *os.Root, relPath string, expected os.FileInfo) e
 		return errPathChanged
 	}
 	return nil
+}
+
+func purgeOpenRootedFile(root *os.Root, relPath string, f *os.File, info os.FileInfo, shred bool) error {
+	purgeBeforeQuarantine(relPath)
+	tombstone, tombDir, err := quarantineRootedSameFile(root, relPath, info)
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+
+	if shred {
+		err = shredOpenFile(f, relPath, info.Size())
+	} else {
+		err = f.Close()
+	}
+	if err != nil {
+		return err
+	}
+	if err := root.Remove(tombstone); err != nil {
+		return fmt.Errorf("removing %s: %w", relPath, err)
+	}
+	_ = root.Remove(tombDir)
+	return nil
+}
+
+func quarantineRootedSameFile(root *os.Root, relPath string, expected os.FileInfo) (string, string, error) {
+	parent := filepath.Dir(relPath)
+	base := filepath.Base(relPath)
+	for range 16 {
+		suffix, err := randomPurgeSuffix()
+		if err != nil {
+			return "", "", err
+		}
+		tombDir := filepath.Join(parent, ".enclaude-purge-"+suffix)
+		if err := root.Mkdir(tombDir, 0700); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return "", "", err
+		}
+		tombstone := filepath.Join(tombDir, base)
+		if err := root.Rename(relPath, tombstone); err != nil {
+			_ = root.Remove(tombDir)
+			return "", "", err
+		}
+		tombInfo, err := root.Lstat(tombstone)
+		if err != nil {
+			_ = root.Rename(tombstone, relPath)
+			_ = root.Remove(tombDir)
+			return "", "", err
+		}
+		if !tombInfo.Mode().IsRegular() || !os.SameFile(expected, tombInfo) {
+			_ = root.Rename(tombstone, relPath)
+			_ = root.Remove(tombDir)
+			return "", "", errPathChanged
+		}
+		return tombstone, tombDir, nil
+	}
+	return "", "", fmt.Errorf("creating unique purge tombstone")
+}
+
+func randomPurgeSuffix() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := cryptorand.Read(buf); err != nil {
+		return "", fmt.Errorf("reading random bytes: %w", err)
+	}
+	return fmt.Sprintf("%x", buf), nil
 }
 
 func shredOpenFile(f *os.File, relPath string, size int64) error {

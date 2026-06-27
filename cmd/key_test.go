@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -310,6 +312,78 @@ func TestRotateKeyCore_AmbiguousRotationPreservesRecoveryKeys(t *testing.T) {
 		if tr.calls[i] != c {
 			t.Fatalf("call[%d] = %q, want %q (full: %v)", i, tr.calls[i], c, tr.calls)
 		}
+	}
+}
+
+func TestWriteRotationRecoveryKeysFileCreatesExclusive0600File(t *testing.T) {
+	oldID := mustGen(t)
+	newID := mustGen(t)
+	path := filepath.Join(t.TempDir(), "recovery.txt")
+
+	if err := writeRotationRecoveryKeysFile(path, oldID, newID); err != nil {
+		t.Fatalf("writeRotationRecoveryKeysFile: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat recovery file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("recovery file mode = %v, want 0600", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read recovery file: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "old="+oldID.String()) || !strings.Contains(text, "new="+newID.String()) {
+		t.Fatalf("recovery file missing expected keys: %q", text)
+	}
+}
+
+func TestWriteRotationRecoveryKeysFileRefusesExistingPath(t *testing.T) {
+	oldID := mustGen(t)
+	newID := mustGen(t)
+	path := filepath.Join(t.TempDir(), "recovery.txt")
+	original := []byte("do not replace")
+	if err := os.WriteFile(path, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeRotationRecoveryKeysFile(path, oldID, newID); err == nil {
+		t.Fatal("expected existing recovery path to fail")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read existing file: %v", err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("existing file was modified: got %q", got)
+	}
+}
+
+func TestWriteRotationRecoveryKeysFileRefusesSymlinkPath(t *testing.T) {
+	oldID := mustGen(t)
+	newID := mustGen(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	link := filepath.Join(dir, "recovery.txt")
+	original := []byte("outside target")
+	if err := os.WriteFile(target, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	if err := writeRotationRecoveryKeysFile(link, oldID, newID); err == nil {
+		t.Fatal("expected symlink recovery path to fail")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read symlink target: %v", err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("symlink target was modified: got %q", got)
 	}
 }
 
