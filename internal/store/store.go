@@ -5,6 +5,7 @@ import (
 	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -838,8 +839,12 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 			continue
 		}
 
+		openFlag := os.O_RDONLY
+		if shred {
+			openFlag = os.O_RDWR
+		}
 		purgeAfterPathCheck(relPath)
-		plaintext, err := root.ReadFile(relPath)
+		file, fileInfo, err := openRootedSameFile(root, relPath, info, openFlag)
 		if err != nil {
 			stats.Errors++
 			if verbose {
@@ -847,7 +852,17 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 			}
 			continue
 		}
+		plaintext, err := io.ReadAll(file)
+		if err != nil {
+			_ = file.Close()
+			stats.Errors++
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  warning: cannot read %s: %v\n", relPath, err)
+			}
+			continue
+		}
 		if ContentHash(plaintext) != entry.ContentHash {
+			_ = file.Close()
 			stats.Skipped++
 			if verbose {
 				fmt.Fprintf(os.Stderr, "  warning: skipping changed plaintext %s\n", relPath)
@@ -855,6 +870,7 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 			continue
 		}
 		if err := verifySealedObject(objects, identity, entry); err != nil {
+			_ = file.Close()
 			stats.Errors++
 			if verbose {
 				fmt.Fprintf(os.Stderr, "  warning: sealed object for %s is not recoverable: %v\n", relPath, err)
@@ -864,6 +880,7 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 
 		stats.Bytes += int64(len(plaintext))
 		if dryRun {
+			_ = file.Close()
 			stats.Removed++
 			if verbose {
 				fmt.Printf("  [purge] %s (%s)\n", relPath, FormatSize(int64(len(plaintext))))
@@ -872,8 +889,26 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 		}
 
 		if shred {
-			err = shredRootedFile(root, relPath, info.Size())
+			err = shredOpenFile(file, relPath, fileInfo.Size())
+			if err == nil {
+				err = ensureRootedSameFile(root, relPath, fileInfo)
+			}
+			if err == nil {
+				err = root.Remove(relPath)
+			}
 		} else {
+			err = ensureRootedSameFile(root, relPath, fileInfo)
+			closeErr := file.Close()
+			if err == nil {
+				err = closeErr
+			}
+			if err != nil {
+				stats.Errors++
+				if verbose {
+					fmt.Fprintf(os.Stderr, "  warning: cannot purge %s: %v\n", relPath, err)
+				}
+				continue
+			}
 			err = root.Remove(relPath)
 		}
 		if err != nil {
@@ -896,7 +931,10 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 	return stats, nil
 }
 
-var errPathHasSymlink = errors.New("path contains symlink")
+var (
+	errPathHasSymlink = errors.New("path contains symlink")
+	errPathChanged    = errors.New("path changed after validation")
+)
 
 // purgeAfterPathCheck is a test hook for exercising path-swap races.
 var purgeAfterPathCheck = func(string) {}
@@ -929,35 +967,59 @@ func lstatNoSymlinkComponents(root *os.Root, relPath string) (os.FileInfo, error
 	return info, nil
 }
 
-func shredRootedFile(root *os.Root, relPath string, size int64) error {
-	f, err := root.OpenFile(relPath, os.O_WRONLY, 0)
+func openRootedSameFile(root *os.Root, relPath string, expected os.FileInfo, flag int) (*os.File, os.FileInfo, error) {
+	f, err := root.OpenFile(relPath, flag, 0)
 	if err != nil {
-		return fmt.Errorf("opening %s for overwrite: %w", relPath, err)
+		return nil, nil, err
 	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(expected, info) {
+		_ = f.Close()
+		return nil, nil, errPathChanged
+	}
+	return f, info, nil
+}
 
+func ensureRootedSameFile(root *os.Root, relPath string, expected os.FileInfo) error {
+	info, err := root.Lstat(relPath)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(expected, info) {
+		return errPathChanged
+	}
+	return nil
+}
+
+func shredOpenFile(f *os.File, relPath string, size int64) error {
+	if _, err := f.Seek(0, 0); err != nil {
+		f.Close()
+		return fmt.Errorf("seeking %s: %w", relPath, err)
+	}
 	buf := make([]byte, min(size, 64*1024))
 	for written := int64(0); written < size; {
 		chunk := int(min(int64(len(buf)), size-written))
 		if _, err := cryptorand.Read(buf[:chunk]); err != nil {
-			f.Close()
+			_ = f.Close()
 			return fmt.Errorf("generating overwrite bytes for %s: %w", relPath, err)
 		}
 		if _, err := f.Write(buf[:chunk]); err != nil {
-			f.Close()
+			_ = f.Close()
 			return fmt.Errorf("overwriting %s: %w", relPath, err)
 		}
 		written += int64(chunk)
 	}
 
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("syncing %s: %w", relPath, err)
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("closing %s: %w", relPath, err)
-	}
-	if err := root.Remove(relPath); err != nil {
-		return fmt.Errorf("removing %s: %w", relPath, err)
 	}
 	return nil
 }
@@ -1373,14 +1435,28 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 // key before Rotate, this error means the old key should be restored.
 var ErrRotationStoreUnchanged = errors.New("rotation left object store encrypted with old key")
 
+// ErrRotationStoreAmbiguous marks a catastrophic rotation failure where neither
+// rollback nor roll-forward could prove a single-key object-store state.
+var ErrRotationStoreAmbiguous = errors.New("rotation left object store in ambiguous key state")
+
 // IsRotationStoreUnchanged reports whether a rotation error left the object
 // store decryptable with the old key.
 func IsRotationStoreUnchanged(err error) bool {
 	return errors.Is(err, ErrRotationStoreUnchanged)
 }
 
+// IsRotationStoreAmbiguous reports whether a rotation error could not recover
+// the object store to a proven old-key or new-key state.
+func IsRotationStoreAmbiguous(err error) bool {
+	return errors.Is(err, ErrRotationStoreAmbiguous)
+}
+
 func rotationStoreUnchangedError(err error) error {
 	return fmt.Errorf("%w: %w", ErrRotationStoreUnchanged, err)
+}
+
+func rotationStoreAmbiguousError(err error) error {
+	return fmt.Errorf("%w: %w", ErrRotationStoreAmbiguous, err)
 }
 
 // rotateObjectWrite is a test hook for exercising apply/rollback failures.
@@ -1395,11 +1471,11 @@ func recoverRotationApplyFailure(store *ObjectStore, oldRoot, newRoot string, al
 	}
 
 	if forwardErr := rollForwardRotatedObjects(store, newRoot, allHashes); forwardErr != nil {
-		return errors.Join(
+		return rotationStoreAmbiguousError(errors.Join(
 			cause,
 			fmt.Errorf("rollback failed: %w", rollbackErr),
 			fmt.Errorf("new-key recovery failed: %w", forwardErr),
-		)
+		))
 	}
 
 	return errors.Join(

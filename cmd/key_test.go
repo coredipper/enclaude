@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"filippo.io/age"
@@ -232,6 +233,75 @@ func TestRotateKeyCore_RotationFailureKeepsNewKeyWhenStoreMayHaveChanged(t *test
 		"genKey",
 		"storeKey:" + newID.Recipient().String(),
 		"rotate",
+	}
+	if len(tr.calls) != len(want) {
+		t.Fatalf("call sequence = %v, want %v", tr.calls, want)
+	}
+	for i, c := range want {
+		if tr.calls[i] != c {
+			t.Fatalf("call[%d] = %q, want %q (full: %v)", i, tr.calls[i], c, tr.calls)
+		}
+	}
+}
+
+func TestRotateKeyCore_AmbiguousRotationPreservesRecoveryKeys(t *testing.T) {
+	tr := &rotateTrace{}
+	oldID := mustGen(t)
+	newID := mustGen(t)
+	rotateErr := errors.New("new-key recovery failed")
+	var stored []*age.X25519Identity
+	var preservedOld, preservedNew *age.X25519Identity
+
+	deps := keyRotateDeps{
+		loadKey: func() (*age.X25519Identity, error) {
+			tr.record("loadKey")
+			return oldID, nil
+		},
+		genKey: func() (*age.X25519Identity, error) {
+			tr.record("genKey")
+			return newID, nil
+		},
+		storeKey: func(id *age.X25519Identity) error {
+			tr.record("storeKey:" + id.Recipient().String())
+			stored = append(stored, id)
+			return nil
+		},
+		rotate: func(*age.X25519Identity, *age.X25519Recipient) (int, error) {
+			tr.record("rotate")
+			return 1, errors.Join(store.ErrRotationStoreAmbiguous, rotateErr)
+		},
+		preserveRecoveryKeys: func(old, new *age.X25519Identity) (string, error) {
+			tr.record("preserveRecoveryKeys")
+			preservedOld, preservedNew = old, new
+			return "/tmp/recovery.txt", nil
+		},
+	}
+
+	_, _, _, err := rotateKeyCore(deps)
+	if err == nil {
+		t.Fatal("expected ambiguous rotation error")
+	}
+	if !errors.Is(err, store.ErrRotationStoreAmbiguous) {
+		t.Fatalf("error chain missing ErrRotationStoreAmbiguous: %v", err)
+	}
+	if !errors.Is(err, rotateErr) {
+		t.Fatalf("error chain missing rotateErr: %v", err)
+	}
+	if !strings.Contains(err.Error(), "/tmp/recovery.txt") {
+		t.Fatalf("error should name recovery path: %v", err)
+	}
+	if len(stored) != 1 || stored[0] != newID {
+		t.Fatalf("stored = %v, want only new identity", stored)
+	}
+	if preservedOld != oldID || preservedNew != newID {
+		t.Fatalf("preserved keys = old %v new %v, want original old/new", preservedOld, preservedNew)
+	}
+	want := []string{
+		"loadKey",
+		"genKey",
+		"storeKey:" + newID.Recipient().String(),
+		"rotate",
+		"preserveRecoveryKeys",
 	}
 	if len(tr.calls) != len(want) {
 		t.Fatalf("call sequence = %v, want %v", tr.calls, want)

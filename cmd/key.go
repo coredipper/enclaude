@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
@@ -21,10 +22,11 @@ import (
 // Injected so tests can verify ordering and failure semantics without touching
 // a real seal store, keyring, or filesystem.
 type keyRotateDeps struct {
-	loadKey  func() (*age.X25519Identity, error)
-	genKey   func() (*age.X25519Identity, error)
-	storeKey func(*age.X25519Identity) error
-	rotate   func(old *age.X25519Identity, newRecipient *age.X25519Recipient) (int, error)
+	loadKey              func() (*age.X25519Identity, error)
+	genKey               func() (*age.X25519Identity, error)
+	storeKey             func(*age.X25519Identity) error
+	rotate               func(old *age.X25519Identity, newRecipient *age.X25519Recipient) (int, error)
+	preserveRecoveryKeys func(old, new *age.X25519Identity) (string, error)
 }
 
 // rotateKeyCore performs key rotation in the only safe order:
@@ -67,11 +69,43 @@ func rotateKeyCore(d keyRotateDeps) (old, new *age.X25519Identity, rotated int, 
 				err = errors.Join(rotationErr, fmt.Errorf("restoring old key after rotation failure: %w", restoreErr))
 				return
 			}
+		} else if store.IsRotationStoreAmbiguous(err) {
+			if d.preserveRecoveryKeys == nil {
+				err = errors.Join(rotationErr, errors.New("rotation key state is ambiguous and no recovery key preservation is configured"))
+				return
+			}
+			recoveryPath, preserveErr := d.preserveRecoveryKeys(old, new)
+			if preserveErr != nil {
+				err = errors.Join(rotationErr, fmt.Errorf("preserving old and new keys for recovery: %w", preserveErr))
+				return
+			}
+			err = errors.Join(rotationErr, fmt.Errorf("saved old and new key material for manual recovery at %s", recoveryPath))
+			return
 		}
 		err = rotationErr
 		return
 	}
 	return
+}
+
+func writeRotationRecoveryKeys(old, new *age.X25519Identity) (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("locating user config dir: %w", err)
+	}
+	dir := filepath.Join(base, "enclaude")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", fmt.Errorf("creating recovery key directory: %w", err)
+	}
+	path := filepath.Join(dir, "key-rotation-recovery-"+time.Now().UTC().Format("20060102T150405Z")+".txt")
+	content := "# enclaude emergency key rotation recovery\n" +
+		"# Keep this file private. The store may need either key until repair completes.\n" +
+		"old=" + old.String() + "\n" +
+		"new=" + new.String() + "\n"
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		return "", fmt.Errorf("writing recovery key file: %w", err)
+	}
+	return path, nil
 }
 
 var keyCmd = &cobra.Command{
@@ -196,6 +230,7 @@ var keyRotateCmd = &cobra.Command{
 				fmt.Println("Re-encrypting all objects...")
 				return store.Rotate(cfg, old, newRecipient, flagVerbose, nil)
 			},
+			preserveRecoveryKeys: writeRotationRecoveryKeys,
 		}
 
 		oldIdentity, newIdentity, rotated, err := rotateKeyCore(deps)

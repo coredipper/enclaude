@@ -423,6 +423,63 @@ func TestPurgePlaintextRootedReadBlocksSymlinkSwap(t *testing.T) {
 	}
 }
 
+func TestPurgePlaintextShredRejectsInRootPathSwap(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	sessionContent, err := os.ReadFile(filepath.Join(claudeDir, sessionRel))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := filepath.Join(claudeDir, "race-target")
+	if err := os.MkdirAll(targetDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	targetPath := filepath.Join(targetDir, "abc123.jsonl")
+	if err := os.WriteFile(targetPath, sessionContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	projDir := filepath.Join(claudeDir, "projects/proj-a")
+
+	originalHook := purgeAfterPathCheck
+	swapped := false
+	purgeAfterPathCheck = func(relPath string) {
+		if swapped || relPath != sessionRel {
+			return
+		}
+		swapped = true
+		if err := os.RemoveAll(projDir); err != nil {
+			t.Fatalf("removing project dir during purge race: %v", err)
+		}
+		if err := os.Symlink("../race-target", projDir); err != nil {
+			t.Skipf("symlink not supported: %v", err)
+		}
+	}
+	t.Cleanup(func() { purgeAfterPathCheck = originalHook })
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, true, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if !swapped {
+		t.Fatal("test hook did not run")
+	}
+	if stats.Removed != 0 || stats.Errors != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 error", stats)
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || !bytes.Equal(got, sessionContent) {
+		t.Fatalf("in-root swap target changed or unreadable: got %q err=%v", got, err)
+	}
+}
+
 func TestSealIdempotent(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()

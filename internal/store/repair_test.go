@@ -399,6 +399,52 @@ func TestRotateRollbackFailureRollsForwardToNewKey(t *testing.T) {
 	}
 }
 
+func TestRotateRollbackAndRollForwardFailureIsAmbiguous(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	oldIdentity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, oldIdentity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	manifest, _ := LoadManifest(sealDir)
+	hashes := uniqueManifestHashes(manifest)
+	if len(hashes) < 2 {
+		t.Fatal("test needs at least two unique objects")
+	}
+
+	originalWrite := rotateObjectWrite
+	writeCalls := 0
+	rotateObjectWrite = func(store *ObjectStore, hash string, data []byte) error {
+		writeCalls++
+		switch writeCalls {
+		case 2:
+			return errors.New("apply failed")
+		case 4:
+			return errors.New("rollback failed")
+		case 5:
+			return errors.New("roll-forward failed")
+		default:
+			return originalWrite(store, hash, data)
+		}
+	}
+	t.Cleanup(func() { rotateObjectWrite = originalWrite })
+
+	newIdentity, _ := crypto.GenerateKey()
+	_, err := Rotate(cfg, oldIdentity, newIdentity.Recipient(), false, nil)
+	if err == nil {
+		t.Fatal("expected Rotate() to report the apply failure")
+	}
+	if !IsRotationStoreAmbiguous(err) {
+		t.Fatalf("error should mark ambiguous key state after failed rollback and roll-forward: %v", err)
+	}
+	if IsRotationStoreUnchanged(err) {
+		t.Fatalf("ambiguous error must not be marked old-key-safe: %v", err)
+	}
+}
+
 // TestVerifyNoManifest verifies Verify fails with "no manifest found" when
 // the seal store has no manifest yet.
 func TestVerifyNoManifest(t *testing.T) {
