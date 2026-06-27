@@ -568,6 +568,59 @@ func TestPurgePlaintextRestoresAfterPostQuarantineFailure(t *testing.T) {
 	if got, err := os.ReadFile(sessionPath); err != nil || !bytes.Equal(got, original) {
 		t.Fatalf("original file was not restored: got %q err=%v", got, err)
 	}
+	assertNoPurgeTombstones(t, claudeDir)
+}
+
+func TestPurgePlaintextRemovesCorruptPostQuarantineFailure(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	sessionPath := filepath.Join(claudeDir, sessionRel)
+
+	originalHook := purgeAfterQuarantine
+	corrupted := false
+	purgeAfterQuarantine = func(relPath string, f *os.File) {
+		if corrupted || relPath != sessionRel {
+			return
+		}
+		corrupted = true
+		if _, err := f.Seek(0, 0); err != nil {
+			t.Fatalf("seeking quarantined file in hook: %v", err)
+		}
+		if _, err := f.Write([]byte("corrupt")); err != nil {
+			t.Fatalf("corrupting quarantined file in hook: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("closing quarantined file in hook: %v", err)
+		}
+	}
+	t.Cleanup(func() { purgeAfterQuarantine = originalHook })
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, true, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if !corrupted {
+		t.Fatal("test hook did not run")
+	}
+	if stats.Removed != 0 || stats.Errors != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 error", stats)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("corrupt file should not be restored: %v", err)
+	}
+	assertNoPurgeTombstones(t, claudeDir)
+}
+
+func assertNoPurgeTombstones(t *testing.T, claudeDir string) {
+	t.Helper()
 	matches, err := filepath.Glob(filepath.Join(claudeDir, "projects/proj-a/.enclaude-purge-*"))
 	if err != nil {
 		t.Fatal(err)

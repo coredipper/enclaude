@@ -888,7 +888,7 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 			continue
 		}
 
-		err = purgeOpenRootedFile(root, relPath, file, fileInfo, shred)
+		err = purgeOpenRootedFile(root, relPath, file, fileInfo, entry.ContentHash, shred)
 		if err != nil {
 			stats.Errors++
 			if verbose {
@@ -979,7 +979,7 @@ func ensureRootedSameFile(root *os.Root, relPath string, expected os.FileInfo) e
 	return nil
 }
 
-func purgeOpenRootedFile(root *os.Root, relPath string, f *os.File, info os.FileInfo, shred bool) error {
+func purgeOpenRootedFile(root *os.Root, relPath string, f *os.File, info os.FileInfo, expectedHash string, shred bool) error {
 	purgeBeforeQuarantine(relPath)
 	tombstone, tombDir, err := quarantineRootedSameFile(root, relPath, info)
 	if err != nil {
@@ -994,7 +994,7 @@ func purgeOpenRootedFile(root *os.Root, relPath string, f *os.File, info os.File
 		err = f.Close()
 	}
 	if err != nil {
-		if cleanupErr := cleanupQuarantinedRootedFile(root, relPath, tombstone, tombDir, info); cleanupErr != nil {
+		if cleanupErr := cleanupQuarantinedRootedFile(root, relPath, tombstone, tombDir, info, expectedHash); cleanupErr != nil {
 			return errors.Join(err, cleanupErr)
 		}
 		return err
@@ -1042,7 +1042,7 @@ func quarantineRootedSameFile(root *os.Root, relPath string, expected os.FileInf
 	return "", "", fmt.Errorf("creating unique purge tombstone")
 }
 
-func cleanupQuarantinedRootedFile(root *os.Root, relPath, tombstone, tombDir string, expected os.FileInfo) error {
+func cleanupQuarantinedRootedFile(root *os.Root, relPath, tombstone, tombDir string, expected os.FileInfo, expectedHash string) error {
 	tombInfo, err := root.Lstat(tombstone)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1055,12 +1055,23 @@ func cleanupQuarantinedRootedFile(root *os.Root, relPath, tombstone, tombDir str
 		return errPathChanged
 	}
 
-	if err := root.Link(tombstone, relPath); err == nil {
+	restorable, hashErr := rootedFileMatchesHash(root, tombstone, expected, expectedHash)
+	if hashErr != nil {
 		if err := root.Remove(tombstone); err != nil {
-			return fmt.Errorf("removing quarantined %s after restore: %w", relPath, err)
+			return errors.Join(hashErr, fmt.Errorf("cleaning quarantined %s: %w", relPath, err))
 		}
 		_ = root.Remove(tombDir)
-		return nil
+		return hashErr
+	}
+	if restorable {
+		err := root.Link(tombstone, relPath)
+		if err == nil {
+			if err := root.Remove(tombstone); err != nil {
+				return fmt.Errorf("removing quarantined %s after restore: %w", relPath, err)
+			}
+			_ = root.Remove(tombDir)
+			return nil
+		}
 	}
 
 	if err := root.Remove(tombstone); err != nil {
@@ -1068,6 +1079,25 @@ func cleanupQuarantinedRootedFile(root *os.Root, relPath, tombstone, tombDir str
 	}
 	_ = root.Remove(tombDir)
 	return nil
+}
+
+func rootedFileMatchesHash(root *os.Root, relPath string, expected os.FileInfo, expectedHash string) (bool, error) {
+	if expectedHash == "" {
+		return false, nil
+	}
+	f, _, err := openRootedSameFile(root, relPath, expected, os.O_RDONLY)
+	if err != nil {
+		return false, err
+	}
+	data, err := io.ReadAll(f)
+	closeErr := f.Close()
+	if err != nil {
+		return false, err
+	}
+	if closeErr != nil {
+		return false, closeErr
+	}
+	return ContentHash(data) == expectedHash, nil
 }
 
 func randomPurgeSuffix() (string, error) {
