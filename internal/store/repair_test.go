@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -337,6 +338,64 @@ func TestRotateMissingObjectFailsWithoutPartialOverwrite(t *testing.T) {
 	}
 	if _, err := crypto.Decrypt(keepAfter, newIdentity); err == nil {
 		t.Fatal("new key should not decrypt object after failed rotation")
+	}
+}
+
+func TestRotateRollbackFailureRollsForwardToNewKey(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	oldIdentity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, oldIdentity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	manifest, _ := LoadManifest(sealDir)
+	hashes := uniqueManifestHashes(manifest)
+	if len(hashes) < 2 {
+		t.Fatal("test needs at least two unique objects")
+	}
+
+	originalWrite := rotateObjectWrite
+	writeCalls := 0
+	rotateObjectWrite = func(store *ObjectStore, hash string, data []byte) error {
+		writeCalls++
+		switch writeCalls {
+		case 2:
+			return errors.New("apply failed")
+		case 4:
+			return errors.New("rollback failed")
+		default:
+			return originalWrite(store, hash, data)
+		}
+	}
+	t.Cleanup(func() { rotateObjectWrite = originalWrite })
+
+	newIdentity, _ := crypto.GenerateKey()
+	rotated, err := Rotate(cfg, oldIdentity, newIdentity.Recipient(), false, nil)
+	if err == nil {
+		t.Fatal("expected Rotate() to report the apply failure")
+	}
+	if IsRotationStoreUnchanged(err) {
+		t.Fatalf("rollback failure recovered to new-key state, but error was marked old-key-safe: %v", err)
+	}
+	if rotated != 1 {
+		t.Fatalf("rotated = %d, want 1 applied object before injected failure", rotated)
+	}
+
+	store := NewObjectStore(sealDir)
+	for _, hash := range hashes {
+		encrypted, err := store.Read(hash)
+		if err != nil {
+			t.Fatalf("reading object %s: %v", shortHash(hash), err)
+		}
+		if _, err := crypto.Decrypt(encrypted, newIdentity); err != nil {
+			t.Fatalf("new key should decrypt %s after roll-forward recovery: %v", shortHash(hash), err)
+		}
+		if _, err := crypto.Decrypt(encrypted, oldIdentity); err == nil {
+			t.Fatalf("old key should not decrypt %s after roll-forward recovery", shortHash(hash))
+		}
 	}
 }
 

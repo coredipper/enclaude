@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 	"maps"
@@ -786,6 +787,12 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 
 	activeSessions := activeSessionIDs(cfg.Seal.ClaudeDir)
 	objects := NewObjectStore(cfg.Seal.SealDir)
+	root, err := os.OpenRoot(cfg.Seal.ClaudeDir)
+	if err != nil {
+		return stats, fmt.Errorf("opening Claude root: %w", err)
+	}
+	defer root.Close()
+
 	paths := make([]string, 0, len(manifest.Files))
 	for path := range manifest.Files {
 		paths = append(paths, path)
@@ -807,8 +814,7 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 			continue
 		}
 
-		absPath := filepath.Join(cfg.Seal.ClaudeDir, relPath)
-		info, err := lstatNoSymlinkComponents(cfg.Seal.ClaudeDir, relPath)
+		info, err := lstatNoSymlinkComponents(root, relPath)
 		if err != nil {
 			if errors.Is(err, errPathHasSymlink) {
 				stats.Skipped++
@@ -832,7 +838,8 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 			continue
 		}
 
-		plaintext, err := os.ReadFile(absPath)
+		purgeAfterPathCheck(relPath)
+		plaintext, err := root.ReadFile(relPath)
 		if err != nil {
 			stats.Errors++
 			if verbose {
@@ -865,9 +872,9 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 		}
 
 		if shred {
-			err = crypto.ShredFile(absPath)
+			err = shredRootedFile(root, relPath, info.Size())
 		} else {
-			err = os.Remove(absPath)
+			err = root.Remove(relPath)
 		}
 		if err != nil {
 			stats.Errors++
@@ -880,9 +887,9 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 		if verbose {
 			fmt.Printf("  [purge] %s (%s)\n", relPath, FormatSize(int64(len(plaintext))))
 		}
-		dir := filepath.Dir(absPath)
-		if dir != cfg.Seal.ClaudeDir {
-			_ = os.Remove(dir)
+		dir := filepath.Dir(relPath)
+		if dir != "." {
+			_ = root.Remove(dir)
 		}
 	}
 
@@ -891,13 +898,16 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 
 var errPathHasSymlink = errors.New("path contains symlink")
 
-func lstatNoSymlinkComponents(root, relPath string) (os.FileInfo, error) {
+// purgeAfterPathCheck is a test hook for exercising path-swap races.
+var purgeAfterPathCheck = func(string) {}
+
+func lstatNoSymlinkComponents(root *os.Root, relPath string) (os.FileInfo, error) {
 	clean := filepath.Clean(relPath)
 	if clean == "." {
 		return nil, fmt.Errorf("empty path")
 	}
 
-	current := root
+	current := ""
 	var info os.FileInfo
 	for _, part := range strings.Split(clean, string(os.PathSeparator)) {
 		if part == "" || part == "." {
@@ -905,7 +915,7 @@ func lstatNoSymlinkComponents(root, relPath string) (os.FileInfo, error) {
 		}
 		current = filepath.Join(current, part)
 		var err error
-		info, err = os.Lstat(current)
+		info, err = root.Lstat(current)
 		if err != nil {
 			return nil, err
 		}
@@ -917,6 +927,39 @@ func lstatNoSymlinkComponents(root, relPath string) (os.FileInfo, error) {
 		return nil, fmt.Errorf("empty path")
 	}
 	return info, nil
+}
+
+func shredRootedFile(root *os.Root, relPath string, size int64) error {
+	f, err := root.OpenFile(relPath, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("opening %s for overwrite: %w", relPath, err)
+	}
+
+	buf := make([]byte, min(size, 64*1024))
+	for written := int64(0); written < size; {
+		chunk := int(min(int64(len(buf)), size-written))
+		if _, err := cryptorand.Read(buf[:chunk]); err != nil {
+			f.Close()
+			return fmt.Errorf("generating overwrite bytes for %s: %w", relPath, err)
+		}
+		if _, err := f.Write(buf[:chunk]); err != nil {
+			f.Close()
+			return fmt.Errorf("overwriting %s: %w", relPath, err)
+		}
+		written += int64(chunk)
+	}
+
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return fmt.Errorf("syncing %s: %w", relPath, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing %s: %w", relPath, err)
+	}
+	if err := root.Remove(relPath); err != nil {
+		return fmt.Errorf("removing %s: %w", relPath, err)
+	}
+	return nil
 }
 
 func verifySealedObject(store *ObjectStore, identity age.Identity, entry FileEntry) error {
@@ -1299,24 +1342,17 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 	for _, hash := range hashes {
 		data, err := os.ReadFile(stagedObjectPath(newRoot, hash))
 		if err != nil {
-			rollbackErr := rollbackRotatedObjects(store, oldRoot, applied)
-			if rollbackErr != nil {
-				return len(applied), errors.Join(
-					fmt.Errorf("reading staged object %s: %w", shortHash(hash), err),
-					fmt.Errorf("rollback failed: %w", rollbackErr),
-				)
-			}
-			return len(applied), rotationStoreUnchangedError(fmt.Errorf("reading staged object %s: %w", shortHash(hash), err))
+			return len(applied), recoverRotationApplyFailure(
+				store, oldRoot, newRoot, hashes, applied,
+				fmt.Errorf("reading staged object %s: %w", shortHash(hash), err),
+			)
 		}
-		if err := store.Write(hash, data); err != nil {
-			rollbackErr := rollbackRotatedObjects(store, oldRoot, append(applied, hash))
-			if rollbackErr != nil {
-				return len(applied), errors.Join(
-					fmt.Errorf("applying rotated object %s: %w", shortHash(hash), err),
-					fmt.Errorf("rollback failed: %w", rollbackErr),
-				)
-			}
-			return len(applied), rotationStoreUnchangedError(fmt.Errorf("applying rotated object %s: %w", shortHash(hash), err))
+		if err := rotateObjectWrite(store, hash, data); err != nil {
+			rollbackHashes := append(append([]string{}, applied...), hash)
+			return len(applied), recoverRotationApplyFailure(
+				store, oldRoot, newRoot, hashes, rollbackHashes,
+				fmt.Errorf("applying rotated object %s: %w", shortHash(hash), err),
+			)
 		}
 		applied = append(applied, hash)
 		if verbose {
@@ -1345,6 +1381,31 @@ func IsRotationStoreUnchanged(err error) bool {
 
 func rotationStoreUnchangedError(err error) error {
 	return fmt.Errorf("%w: %w", ErrRotationStoreUnchanged, err)
+}
+
+// rotateObjectWrite is a test hook for exercising apply/rollback failures.
+var rotateObjectWrite = func(store *ObjectStore, hash string, data []byte) error {
+	return store.Write(hash, data)
+}
+
+func recoverRotationApplyFailure(store *ObjectStore, oldRoot, newRoot string, allHashes, rollbackHashes []string, cause error) error {
+	rollbackErr := rollbackRotatedObjects(store, oldRoot, rollbackHashes)
+	if rollbackErr == nil {
+		return rotationStoreUnchangedError(cause)
+	}
+
+	if forwardErr := rollForwardRotatedObjects(store, newRoot, allHashes); forwardErr != nil {
+		return errors.Join(
+			cause,
+			fmt.Errorf("rollback failed: %w", rollbackErr),
+			fmt.Errorf("new-key recovery failed: %w", forwardErr),
+		)
+	}
+
+	return errors.Join(
+		cause,
+		fmt.Errorf("rollback failed; recovered all rotated objects with new key: %w", rollbackErr),
+	)
 }
 
 func uniqueManifestHashes(manifest *Manifest) []string {
@@ -1382,8 +1443,23 @@ func rollbackRotatedObjects(store *ObjectStore, oldRoot string, hashes []string)
 			errs = append(errs, fmt.Errorf("read backup %s: %w", shortHash(hash), err))
 			continue
 		}
-		if err := store.Write(hash, data); err != nil {
+		if err := rotateObjectWrite(store, hash, data); err != nil {
 			errs = append(errs, fmt.Errorf("restore %s: %w", shortHash(hash), err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func rollForwardRotatedObjects(store *ObjectStore, newRoot string, hashes []string) error {
+	var errs []error
+	for _, hash := range hashes {
+		data, err := os.ReadFile(stagedObjectPath(newRoot, hash))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read rotated %s: %w", shortHash(hash), err))
+			continue
+		}
+		if err := rotateObjectWrite(store, hash, data); err != nil {
+			errs = append(errs, fmt.Errorf("recover %s: %w", shortHash(hash), err))
 		}
 	}
 	return errors.Join(errs...)
