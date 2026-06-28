@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -273,6 +274,180 @@ func TestRotateReEncrypts(t *testing.T) {
 		if ContentHash(origData) != entry.ContentHash || ContentHash(restoredData) != entry.ContentHash {
 			t.Errorf("content mismatch for %s after rotation", path)
 		}
+	}
+}
+
+// TestRotateMissingObjectFailsWithoutPartialOverwrite guards rotation's
+// all-or-nothing preflight: if any referenced object is missing, no already
+// readable object should be overwritten to the new key.
+func TestRotateMissingObjectFailsWithoutPartialOverwrite(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	oldIdentity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, oldIdentity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	manifest, _ := LoadManifest(sealDir)
+	store := NewObjectStore(sealDir)
+	var keepHash, missingHash string
+	for _, entry := range manifest.Files {
+		if keepHash == "" {
+			keepHash = entry.ContentHash
+			continue
+		}
+		if entry.ContentHash != keepHash {
+			missingHash = entry.ContentHash
+			break
+		}
+	}
+	if keepHash == "" || missingHash == "" {
+		t.Fatal("test needs at least two unique objects")
+	}
+	keepBefore, err := store.Read(keepHash)
+	if err != nil {
+		t.Fatalf("reading keep object: %v", err)
+	}
+	if err := os.Remove(store.ObjectPath(missingHash)); err != nil {
+		t.Fatalf("removing missing object: %v", err)
+	}
+
+	newIdentity, _ := crypto.GenerateKey()
+	rotated, err := Rotate(cfg, oldIdentity, newIdentity.Recipient(), false, nil)
+	if err == nil {
+		t.Fatal("expected Rotate() to fail when an object is missing")
+	}
+	if !IsRotationStoreUnchanged(err) {
+		t.Fatalf("missing-object rotate error should be old-key-safe: %v", err)
+	}
+	if rotated != 0 {
+		t.Fatalf("rotated = %d, want 0 before preflight failure", rotated)
+	}
+
+	keepAfter, err := store.Read(keepHash)
+	if err != nil {
+		t.Fatalf("reading keep object after failed rotate: %v", err)
+	}
+	if !bytes.Equal(keepAfter, keepBefore) {
+		t.Fatal("failed rotation overwrote an object before preflight completed")
+	}
+	if _, err := crypto.Decrypt(keepAfter, oldIdentity); err != nil {
+		t.Fatalf("old key should still decrypt untouched object: %v", err)
+	}
+	if _, err := crypto.Decrypt(keepAfter, newIdentity); err == nil {
+		t.Fatal("new key should not decrypt object after failed rotation")
+	}
+}
+
+// TestRotateRollbackFailureRollsForwardToNewKey verifies that when applying a
+// rotated object fails and the rollback also fails, Rotate rolls every object
+// forward to the new key and reports an error that is not marked old-key-safe.
+func TestRotateRollbackFailureRollsForwardToNewKey(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	oldIdentity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, oldIdentity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	manifest, _ := LoadManifest(sealDir)
+	hashes := uniqueManifestHashes(manifest)
+	if len(hashes) < 2 {
+		t.Fatal("test needs at least two unique objects")
+	}
+
+	originalWrite := rotateObjectWrite
+	writeCalls := 0
+	rotateObjectWrite = func(store *ObjectStore, hash string, data []byte) error {
+		writeCalls++
+		switch writeCalls {
+		case 2:
+			return errors.New("apply failed")
+		case 4:
+			return errors.New("rollback failed")
+		default:
+			return originalWrite(store, hash, data)
+		}
+	}
+	t.Cleanup(func() { rotateObjectWrite = originalWrite })
+
+	newIdentity, _ := crypto.GenerateKey()
+	rotated, err := Rotate(cfg, oldIdentity, newIdentity.Recipient(), false, nil)
+	if err == nil {
+		t.Fatal("expected Rotate() to report the apply failure")
+	}
+	if IsRotationStoreUnchanged(err) {
+		t.Fatalf("rollback failure recovered to new-key state, but error was marked old-key-safe: %v", err)
+	}
+	if rotated != 1 {
+		t.Fatalf("rotated = %d, want 1 applied object before injected failure", rotated)
+	}
+
+	store := NewObjectStore(sealDir)
+	for _, hash := range hashes {
+		encrypted, err := store.Read(hash)
+		if err != nil {
+			t.Fatalf("reading object %s: %v", shortHash(hash), err)
+		}
+		if _, err := crypto.Decrypt(encrypted, newIdentity); err != nil {
+			t.Fatalf("new key should decrypt %s after roll-forward recovery: %v", shortHash(hash), err)
+		}
+		if _, err := crypto.Decrypt(encrypted, oldIdentity); err == nil {
+			t.Fatalf("old key should not decrypt %s after roll-forward recovery", shortHash(hash))
+		}
+	}
+}
+
+// TestRotateRollbackAndRollForwardFailureIsAmbiguous verifies that when apply,
+// rollback, and roll-forward all fail, Rotate marks the object-store state
+// ambiguous so the caller preserves both keys instead of guessing.
+func TestRotateRollbackAndRollForwardFailureIsAmbiguous(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	oldIdentity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, oldIdentity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	manifest, _ := LoadManifest(sealDir)
+	hashes := uniqueManifestHashes(manifest)
+	if len(hashes) < 2 {
+		t.Fatal("test needs at least two unique objects")
+	}
+
+	originalWrite := rotateObjectWrite
+	writeCalls := 0
+	rotateObjectWrite = func(store *ObjectStore, hash string, data []byte) error {
+		writeCalls++
+		switch writeCalls {
+		case 2:
+			return errors.New("apply failed")
+		case 4:
+			return errors.New("rollback failed")
+		case 5:
+			return errors.New("roll-forward failed")
+		default:
+			return originalWrite(store, hash, data)
+		}
+	}
+	t.Cleanup(func() { rotateObjectWrite = originalWrite })
+
+	newIdentity, _ := crypto.GenerateKey()
+	_, err := Rotate(cfg, oldIdentity, newIdentity.Recipient(), false, nil)
+	if err == nil {
+		t.Fatal("expected Rotate() to report the apply failure")
+	}
+	if !IsRotationStoreAmbiguous(err) {
+		t.Fatalf("error should mark ambiguous key state after failed rollback and roll-forward: %v", err)
+	}
+	if IsRotationStoreUnchanged(err) {
+		t.Fatalf("ambiguous error must not be marked old-key-safe: %v", err)
 	}
 }
 

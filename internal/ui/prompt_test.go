@@ -72,3 +72,15 @@ func TestSanitizePassphrase_OnlyNewlineBecomesEmpty(t *testing.T) {
 		t.Fatalf("got %q, want empty", got)
 	}
 }
+
+// TestReadPassphraseOptional_NonTTYSkips verifies optional backup prompts do
+// not make non-interactive init fail. go test runs with non-terminal stdin.
+func TestReadPassphraseOptional_NonTTYSkips(t *testing.T) {
+	got, err := ReadPassphraseOptional("optional: ")
+	if err != nil {
+		t.Fatalf("ReadPassphraseOptional() error = %v", err)
+	}
+	if got != "" {
+		t.Fatalf("ReadPassphraseOptional() = %q, want empty skip", got)
+	}
+}

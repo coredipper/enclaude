@@ -184,6 +184,468 @@ func TestSealUnsealRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPurgePlaintextCompletedSessionsOnly verifies the default purge scope
+// removes only sealed top-level completed session transcripts, leaving history,
+// memory, settings, and nested subagent JSONL files in place.
+func TestPurgePlaintextCompletedSessionsOnly(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, false, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if stats.Removed != 1 {
+		t.Fatalf("Removed = %d, want 1 (%s)", stats.Removed, stats)
+	}
+
+	if _, err := os.Stat(filepath.Join(claudeDir, "projects/proj-a/abc123.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("top-level session still exists or stat failed unexpectedly: %v", err)
+	}
+	for _, rel := range []string{
+		"history.jsonl",
+		"settings.json",
+		"projects/proj-a/memory/MEMORY.md",
+		"projects/proj-a/subagents/agent-abc.jsonl",
+	} {
+		if _, err := os.Stat(filepath.Join(claudeDir, rel)); err != nil {
+			t.Fatalf("%s should remain after completed-session purge: %v", rel, err)
+		}
+	}
+}
+
+// TestPurgePlaintextSkipsChangedPlaintext guards against deleting unsynced
+// edits: a candidate file must still hash to the sealed manifest entry.
+func TestPurgePlaintextSkipsChangedPlaintext(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionPath := filepath.Join(claudeDir, "projects/proj-a/abc123.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"type":"user","message":"unsynced"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, false, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if stats.Removed != 0 || stats.Skipped != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 skipped", stats)
+	}
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Fatalf("changed plaintext should remain: %v", err)
+	}
+}
+
+// TestPurgePlaintextRequiresRecoverableObject verifies purge will not remove
+// plaintext when the encrypted object is absent, because that plaintext may be
+// the only usable copy.
+func TestPurgePlaintextRequiresRecoverableObject(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	manifest, _ := LoadManifest(sealDir)
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	hash := manifest.Files[sessionRel].ContentHash
+	if err := os.Remove(NewObjectStore(sealDir).ObjectPath(hash)); err != nil {
+		t.Fatalf("removing sealed object: %v", err)
+	}
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, false, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if stats.Removed != 0 || stats.Errors != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 error", stats)
+	}
+	if _, err := os.Stat(filepath.Join(claudeDir, sessionRel)); err != nil {
+		t.Fatalf("plaintext should remain when sealed object is missing: %v", err)
+	}
+}
+
+// TestPurgePlaintextSkipsSymlink verifies purge never follows a managed path
+// symlink, which would let --shred overwrite a target outside ClaudeDir.
+func TestPurgePlaintextSkipsSymlink(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionPath := filepath.Join(claudeDir, "projects/proj-a/abc123.jsonl")
+	targetPath := filepath.Join(t.TempDir(), "outside.jsonl")
+	targetContent := []byte(`{"type":"user"}`)
+	if err := os.WriteFile(targetPath, targetContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(sessionPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetPath, sessionPath); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, true, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if stats.Removed != 0 || stats.Skipped != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 skipped", stats)
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || !bytes.Equal(got, targetContent) {
+		t.Fatalf("symlink target changed or unreadable: got %q err=%v", got, err)
+	}
+	if info, err := os.Lstat(sessionPath); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("symlink should remain skipped: info=%v err=%v", info, err)
+	}
+}
+
+// TestPurgePlaintextSkipsSymlinkedParent verifies purge rejects symlinks in
+// every managed path component, not only the final file.
+func TestPurgePlaintextSkipsSymlinkedParent(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	sessionPath := filepath.Join(claudeDir, sessionRel)
+	sessionContent, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outsideDir := t.TempDir()
+	targetPath := filepath.Join(outsideDir, "abc123.jsonl")
+	if err := os.WriteFile(targetPath, sessionContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	projDir := filepath.Join(claudeDir, "projects/proj-a")
+	if err := os.RemoveAll(projDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDir, projDir); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, true, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if stats.Removed != 0 || stats.Skipped != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 skipped", stats)
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || !bytes.Equal(got, sessionContent) {
+		t.Fatalf("symlink target changed or unreadable: got %q err=%v", got, err)
+	}
+	if info, err := os.Lstat(projDir); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("project directory symlink should remain skipped: info=%v err=%v", info, err)
+	}
+}
+
+// TestPurgePlaintextRootedReadBlocksSymlinkSwap verifies that a symlink swapped
+// into a managed path after the precheck cannot redirect purge to a file outside
+// ClaudeDir; the rooted re-open detects the change and errors instead of removing.
+func TestPurgePlaintextRootedReadBlocksSymlinkSwap(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	sessionPath := filepath.Join(claudeDir, sessionRel)
+	sessionContent, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outsideDir := t.TempDir()
+	targetPath := filepath.Join(outsideDir, "abc123.jsonl")
+	if err := os.WriteFile(targetPath, sessionContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	projDir := filepath.Join(claudeDir, "projects/proj-a")
+
+	originalHook := purgeAfterPathCheck
+	swapped := false
+	purgeAfterPathCheck = func(relPath string) {
+		if swapped || relPath != sessionRel {
+			return
+		}
+		swapped = true
+		if err := os.RemoveAll(projDir); err != nil {
+			t.Fatalf("removing project dir during purge race: %v", err)
+		}
+		if err := os.Symlink(outsideDir, projDir); err != nil {
+			t.Skipf("symlink not supported: %v", err)
+		}
+	}
+	t.Cleanup(func() { purgeAfterPathCheck = originalHook })
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, true, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if !swapped {
+		t.Fatal("test hook did not run")
+	}
+	if stats.Removed != 0 || stats.Errors != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 error", stats)
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || !bytes.Equal(got, sessionContent) {
+		t.Fatalf("symlink target changed or unreadable: got %q err=%v", got, err)
+	}
+}
+
+// TestPurgePlaintextShredRejectsInRootPathSwap verifies that an in-root symlink
+// swapped in after the precheck is rejected, so --shred cannot overwrite a
+// different in-root target than the file that was hash-verified.
+func TestPurgePlaintextShredRejectsInRootPathSwap(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	sessionContent, err := os.ReadFile(filepath.Join(claudeDir, sessionRel))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := filepath.Join(claudeDir, "race-target")
+	if err := os.MkdirAll(targetDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	targetPath := filepath.Join(targetDir, "abc123.jsonl")
+	if err := os.WriteFile(targetPath, sessionContent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	projDir := filepath.Join(claudeDir, "projects/proj-a")
+
+	originalHook := purgeAfterPathCheck
+	swapped := false
+	purgeAfterPathCheck = func(relPath string) {
+		if swapped || relPath != sessionRel {
+			return
+		}
+		swapped = true
+		if err := os.RemoveAll(projDir); err != nil {
+			t.Fatalf("removing project dir during purge race: %v", err)
+		}
+		if err := os.Symlink("../race-target", projDir); err != nil {
+			t.Skipf("symlink not supported: %v", err)
+		}
+	}
+	t.Cleanup(func() { purgeAfterPathCheck = originalHook })
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, true, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if !swapped {
+		t.Fatal("test hook did not run")
+	}
+	if stats.Removed != 0 || stats.Errors != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 error", stats)
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || !bytes.Equal(got, sessionContent) {
+		t.Fatalf("in-root swap target changed or unreadable: got %q err=%v", got, err)
+	}
+}
+
+// TestPurgePlaintextRejectsFinalRemovePathSwap verifies that a managed file
+// replaced between hash verification and quarantine is detected via the
+// same-file check and left in place rather than removed.
+func TestPurgePlaintextRejectsFinalRemovePathSwap(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	sessionPath := filepath.Join(claudeDir, sessionRel)
+	replacement := []byte(`{"type":"user","message":"replacement"}`)
+
+	originalHook := purgeBeforeQuarantine
+	swapped := false
+	purgeBeforeQuarantine = func(relPath string) {
+		if swapped || relPath != sessionRel {
+			return
+		}
+		swapped = true
+		if err := os.Remove(sessionPath); err != nil {
+			t.Fatalf("removing original during purge race: %v", err)
+		}
+		if err := os.WriteFile(sessionPath, replacement, 0600); err != nil {
+			t.Fatalf("writing replacement during purge race: %v", err)
+		}
+	}
+	t.Cleanup(func() { purgeBeforeQuarantine = originalHook })
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, false, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if !swapped {
+		t.Fatal("test hook did not run")
+	}
+	if stats.Removed != 0 || stats.Errors != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 error", stats)
+	}
+	if got, err := os.ReadFile(sessionPath); err != nil || !bytes.Equal(got, replacement) {
+		t.Fatalf("replacement file changed or unreadable: got %q err=%v", got, err)
+	}
+}
+
+// TestPurgePlaintextRestoresAfterPostQuarantineFailure verifies that a failure
+// after quarantine restores the original, still-intact plaintext and leaves no
+// purge tombstone behind.
+func TestPurgePlaintextRestoresAfterPostQuarantineFailure(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	sessionPath := filepath.Join(claudeDir, sessionRel)
+	original, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	originalHook := purgeAfterQuarantine
+	closed := false
+	purgeAfterQuarantine = func(relPath string, f *os.File) {
+		if closed || relPath != sessionRel {
+			return
+		}
+		closed = true
+		if err := f.Close(); err != nil {
+			t.Fatalf("closing quarantined file in hook: %v", err)
+		}
+	}
+	t.Cleanup(func() { purgeAfterQuarantine = originalHook })
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, false, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if !closed {
+		t.Fatal("test hook did not run")
+	}
+	if stats.Removed != 0 || stats.Errors != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 error", stats)
+	}
+	if got, err := os.ReadFile(sessionPath); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("original file was not restored: got %q err=%v", got, err)
+	}
+	assertNoPurgeTombstones(t, claudeDir)
+}
+
+// TestPurgePlaintextRemovesCorruptPostQuarantineFailure verifies that a failure
+// after the quarantined bytes were already corrupted removes the file — the
+// sealed object is recoverable — rather than restoring corruption, leaving no
+// tombstone behind.
+func TestPurgePlaintextRemovesCorruptPostQuarantineFailure(t *testing.T) {
+	claudeDir := setupTestDir(t)
+	sealDir := t.TempDir()
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal() error: %v", err)
+	}
+
+	sessionRel := "projects/proj-a/abc123.jsonl"
+	sessionPath := filepath.Join(claudeDir, sessionRel)
+
+	originalHook := purgeAfterQuarantine
+	corrupted := false
+	purgeAfterQuarantine = func(relPath string, f *os.File) {
+		if corrupted || relPath != sessionRel {
+			return
+		}
+		corrupted = true
+		if _, err := f.Seek(0, 0); err != nil {
+			t.Fatalf("seeking quarantined file in hook: %v", err)
+		}
+		if _, err := f.Write([]byte("corrupt")); err != nil {
+			t.Fatalf("corrupting quarantined file in hook: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("closing quarantined file in hook: %v", err)
+		}
+	}
+	t.Cleanup(func() { purgeAfterQuarantine = originalHook })
+
+	stats, err := PurgePlaintext(cfg, identity, PurgeCompletedSessions, true, false, false)
+	if err != nil {
+		t.Fatalf("PurgePlaintext() error: %v", err)
+	}
+	if !corrupted {
+		t.Fatal("test hook did not run")
+	}
+	if stats.Removed != 0 || stats.Errors != 1 {
+		t.Fatalf("stats = %s, want 0 removed and 1 error", stats)
+	}
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("corrupt file should not be restored: %v", err)
+	}
+	assertNoPurgeTombstones(t, claudeDir)
+}
+
+func assertNoPurgeTombstones(t *testing.T, claudeDir string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(claudeDir, "projects/proj-a/.enclaude-purge-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("left purge tombstone directories: %v", matches)
+	}
+}
+
 func TestSealIdempotent(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
