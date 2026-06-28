@@ -368,6 +368,9 @@ func TestPurgePlaintextSkipsSymlinkedParent(t *testing.T) {
 	}
 }
 
+// TestPurgePlaintextRootedReadBlocksSymlinkSwap verifies that a symlink swapped
+// into a managed path after the precheck cannot redirect purge to a file outside
+// ClaudeDir; the rooted re-open detects the change and errors instead of removing.
 func TestPurgePlaintextRootedReadBlocksSymlinkSwap(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -423,6 +426,9 @@ func TestPurgePlaintextRootedReadBlocksSymlinkSwap(t *testing.T) {
 	}
 }
 
+// TestPurgePlaintextShredRejectsInRootPathSwap verifies that an in-root symlink
+// swapped in after the precheck is rejected, so --shred cannot overwrite a
+// different in-root target than the file that was hash-verified.
 func TestPurgePlaintextShredRejectsInRootPathSwap(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -480,6 +486,9 @@ func TestPurgePlaintextShredRejectsInRootPathSwap(t *testing.T) {
 	}
 }
 
+// TestPurgePlaintextRejectsFinalRemovePathSwap verifies that a managed file
+// replaced between hash verification and quarantine is detected via the
+// same-file check and left in place rather than removed.
 func TestPurgePlaintextRejectsFinalRemovePathSwap(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -525,6 +534,9 @@ func TestPurgePlaintextRejectsFinalRemovePathSwap(t *testing.T) {
 	}
 }
 
+// TestPurgePlaintextRestoresAfterPostQuarantineFailure verifies that a failure
+// after quarantine restores the original, still-intact plaintext and leaves no
+// purge tombstone behind.
 func TestPurgePlaintextRestoresAfterPostQuarantineFailure(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -571,6 +583,10 @@ func TestPurgePlaintextRestoresAfterPostQuarantineFailure(t *testing.T) {
 	assertNoPurgeTombstones(t, claudeDir)
 }
 
+// TestPurgePlaintextRemovesCorruptPostQuarantineFailure verifies that a failure
+// after the quarantined bytes were already corrupted removes the file — the
+// sealed object is recoverable — rather than restoring corruption, leaving no
+// tombstone behind.
 func TestPurgePlaintextRemovesCorruptPostQuarantineFailure(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()

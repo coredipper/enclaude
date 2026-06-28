@@ -341,6 +341,9 @@ func TestRotateMissingObjectFailsWithoutPartialOverwrite(t *testing.T) {
 	}
 }
 
+// TestRotateRollbackFailureRollsForwardToNewKey verifies that when applying a
+// rotated object fails and the rollback also fails, Rotate rolls every object
+// forward to the new key and reports an error that is not marked old-key-safe.
 func TestRotateRollbackFailureRollsForwardToNewKey(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
@@ -399,6 +402,9 @@ func TestRotateRollbackFailureRollsForwardToNewKey(t *testing.T) {
 	}
 }
 
+// TestRotateRollbackAndRollForwardFailureIsAmbiguous verifies that when apply,
+// rollback, and roll-forward all fail, Rotate marks the object-store state
+// ambiguous so the caller preserves both keys instead of guessing.
 func TestRotateRollbackAndRollForwardFailureIsAmbiguous(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()

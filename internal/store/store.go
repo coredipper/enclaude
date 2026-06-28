@@ -878,9 +878,9 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 			continue
 		}
 
-		stats.Bytes += int64(len(plaintext))
 		if dryRun {
 			_ = file.Close()
+			stats.Bytes += int64(len(plaintext))
 			stats.Removed++
 			if verbose {
 				fmt.Printf("  [purge] %s (%s)\n", relPath, FormatSize(int64(len(plaintext))))
@@ -896,6 +896,7 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 			}
 			continue
 		}
+		stats.Bytes += int64(len(plaintext))
 		stats.Removed++
 		if verbose {
 			fmt.Printf("  [purge] %s (%s)\n", relPath, FormatSize(int64(len(plaintext))))
@@ -968,17 +969,6 @@ func openRootedSameFile(root *os.Root, relPath string, expected os.FileInfo, fla
 	return f, info, nil
 }
 
-func ensureRootedSameFile(root *os.Root, relPath string, expected os.FileInfo) error {
-	info, err := root.Lstat(relPath)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || !os.SameFile(expected, info) {
-		return errPathChanged
-	}
-	return nil
-}
-
 func purgeOpenRootedFile(root *os.Root, relPath string, f *os.File, info os.FileInfo, expectedHash string, shred bool) error {
 	purgeBeforeQuarantine(relPath)
 	tombstone, tombDir, err := quarantineRootedSameFile(root, relPath, info)
@@ -1010,7 +1000,7 @@ func quarantineRootedSameFile(root *os.Root, relPath string, expected os.FileInf
 	parent := filepath.Dir(relPath)
 	base := filepath.Base(relPath)
 	for range 16 {
-		suffix, err := randomPurgeSuffix()
+		suffix, err := RandomHex(8)
 		if err != nil {
 			return "", "", err
 		}
@@ -1100,8 +1090,9 @@ func rootedFileMatchesHash(root *os.Root, relPath string, expected os.FileInfo, 
 	return ContentHash(data) == expectedHash, nil
 }
 
-func randomPurgeSuffix() (string, error) {
-	buf := make([]byte, 8)
+// RandomHex returns n cryptographically random bytes encoded as a hex string.
+func RandomHex(n int) (string, error) {
+	buf := make([]byte, n)
 	if _, err := cryptorand.Read(buf); err != nil {
 		return "", fmt.Errorf("reading random bytes: %w", err)
 	}

@@ -246,6 +246,10 @@ func TestRotateKeyCore_RotationFailureKeepsNewKeyWhenStoreMayHaveChanged(t *test
 	}
 }
 
+// TestRotateKeyCore_AmbiguousRotationPreservesRecoveryKeys verifies that when
+// rotation reports an ambiguous object-store state, the core invokes the
+// recovery-key hook with both identities and surfaces the recovery file path in
+// the error, rather than discarding either key.
 func TestRotateKeyCore_AmbiguousRotationPreservesRecoveryKeys(t *testing.T) {
 	tr := &rotateTrace{}
 	oldID := mustGen(t)
@@ -315,6 +319,9 @@ func TestRotateKeyCore_AmbiguousRotationPreservesRecoveryKeys(t *testing.T) {
 	}
 }
 
+// TestWriteRotationRecoveryKeysFileCreatesExclusive0600File verifies the
+// emergency recovery file is created with 0600 permissions and contains both
+// the old and new private keys.
 func TestWriteRotationRecoveryKeysFileCreatesExclusive0600File(t *testing.T) {
 	oldID := mustGen(t)
 	newID := mustGen(t)
@@ -340,6 +347,8 @@ func TestWriteRotationRecoveryKeysFileCreatesExclusive0600File(t *testing.T) {
 	}
 }
 
+// TestWriteRotationRecoveryKeysFileRefusesExistingPath guards the O_EXCL create:
+// an existing path is left untouched rather than overwritten with key material.
 func TestWriteRotationRecoveryKeysFileRefusesExistingPath(t *testing.T) {
 	oldID := mustGen(t)
 	newID := mustGen(t)
@@ -361,6 +370,9 @@ func TestWriteRotationRecoveryKeysFileRefusesExistingPath(t *testing.T) {
 	}
 }
 
+// TestWriteRotationRecoveryKeysFileRefusesSymlinkPath guards against following a
+// symlink at the recovery path, which would write key material to an
+// attacker-chosen target outside the config dir.
 func TestWriteRotationRecoveryKeysFileRefusesSymlinkPath(t *testing.T) {
 	oldID := mustGen(t)
 	newID := mustGen(t)

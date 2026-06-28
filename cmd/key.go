@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bufio"
-	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -101,7 +100,7 @@ func writeRotationRecoveryKeys(old, new *age.X25519Identity) (string, error) {
 	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
 	var lastErr error
 	for range 16 {
-		suffix, err := randomHex(8)
+		suffix, err := store.RandomHex(8)
 		if err != nil {
 			return "", err
 		}
@@ -134,14 +133,6 @@ func writeRotationRecoveryKeysFile(path string, old, new *age.X25519Identity) er
 		return fmt.Errorf("closing recovery key file: %w", err)
 	}
 	return nil
-}
-
-func randomHex(n int) (string, error) {
-	buf := make([]byte, n)
-	if _, err := cryptorand.Read(buf); err != nil {
-		return "", fmt.Errorf("reading random bytes: %w", err)
-	}
-	return fmt.Sprintf("%x", buf), nil
 }
 
 var keyCmd = &cobra.Command{
