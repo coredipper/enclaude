@@ -62,6 +62,36 @@ func TestGitOptionInjectionMitigation(t *testing.T) {
 		}
 	})
 
+	t.Run("Pull dashed branch", func(t *testing.T) {
+		_, _, err := baseGit.Pull("origin", "--orphan")
+		if err == nil {
+			t.Fatalf("Pull accepted dashed branch, expected rejection")
+		}
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("Expected rejection due to dash, got: %v", err)
+		}
+	})
+
+	t.Run("Push dashed branch", func(t *testing.T) {
+		_, _, err := baseGit.Push("origin", "--orphan")
+		if err == nil {
+			t.Fatalf("Push accepted dashed branch, expected rejection")
+		}
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("Expected rejection due to dash, got: %v", err)
+		}
+	})
+
+	t.Run("PushWithUpstream dashed branch", func(t *testing.T) {
+		_, _, err := baseGit.PushWithUpstream("origin", "--orphan")
+		if err == nil {
+			t.Fatalf("PushWithUpstream accepted dashed branch, expected rejection")
+		}
+		if !strings.Contains(err.Error(), "dash") {
+			t.Errorf("Expected rejection due to dash, got: %v", err)
+		}
+	})
+
 	// Test remote with dashed name
 	t.Run("RemoteAdd dashed name", func(t *testing.T) {
 		err := baseGit.RemoteAdd("--upload-pack=exploit", "http://example.com")

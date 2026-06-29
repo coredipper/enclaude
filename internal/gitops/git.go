@@ -198,6 +198,9 @@ func (g *Git) pushWithArgs(remote, branch string, setUpstream bool) (PushStats, 
 	if err := rejectUnsafeRemoteURL(remote); err != nil {
 		return PushStats{}, "", err
 	}
+	if err := rejectUnsafeRef(branch); err != nil {
+		return PushStats{}, "", err
+	}
 	start := time.Now()
 	stats := PushStats{}
 
@@ -251,6 +254,9 @@ func (g *Git) Fetch(remote string) (string, error) {
 // consumes for [enclaude-merge] lines on stderr).
 func (g *Git) Pull(remote, branch string) (PullStats, string, error) {
 	if err := rejectUnsafeRemoteURL(remote); err != nil {
+		return PullStats{}, "", err
+	}
+	if err := rejectUnsafeRef(branch); err != nil {
 		return PullStats{}, "", err
 	}
 	start := time.Now()
