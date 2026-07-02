@@ -123,7 +123,12 @@ func (g *Git) runSeparate(args ...string) (stdout, stderr string, err error) {
 
 // Init initializes a new git repository.
 func (g *Git) Init() error {
-	_, err := g.run("init")
+	if _, err := g.run("init"); err != nil {
+		return err
+	}
+	// Disable background garbage collection to prevent races with test cleanups
+	// and ensure predictable object storage behavior.
+	_, err := g.run("config", "gc.auto", "0")
 	return err
 }
 
