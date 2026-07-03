@@ -930,24 +930,29 @@ func lstatNoSymlinkComponents(root *os.Root, relPath string) (os.FileInfo, error
 		return nil, fmt.Errorf("empty path")
 	}
 
-	current := ""
+	// Optimization: avoid strings.Split to eliminate slice allocations.
 	var info os.FileInfo
-	for _, part := range strings.Split(clean, string(os.PathSeparator)) {
-		if part == "" || part == "." {
-			continue
-		}
-		current = filepath.Join(current, part)
-		var err error
-		info, err = root.Lstat(current)
-		if err != nil {
-			return nil, err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return nil, errPathHasSymlink
+	var err error
+	for i := 0; i < len(clean); i++ {
+		if os.IsPathSeparator(clean[i]) {
+			if i == 0 {
+				continue // e.g. leading slash in absolute paths
+			}
+			info, err = root.Lstat(clean[:i])
+			if err != nil {
+				return nil, err
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				return nil, errPathHasSymlink
+			}
 		}
 	}
-	if info == nil {
-		return nil, fmt.Errorf("empty path")
+	info, err = root.Lstat(clean)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, errPathHasSymlink
 	}
 	return info, nil
 }

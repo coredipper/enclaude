@@ -8,6 +8,17 @@ import (
 	"testing"
 )
 
+func initTestRepo(t *testing.T, g *Git) {
+	t.Helper()
+	if err := g.Init(); err != nil {
+		t.Fatal(err)
+	}
+	// Disable background garbage collection to prevent races with t.TempDir cleanup
+	if _, err := g.run("config", "gc.auto", "0"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGitOptionInjectionMitigation(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -17,9 +28,7 @@ func TestGitOptionInjectionMitigation(t *testing.T) {
 		t.Fatal(err)
 	}
 	baseGit := New(baseDir)
-	if err := baseGit.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, baseGit)
 	// Configure git for CI environments where user is not set
 	if _, err := baseGit.run("config", "user.name", "Test User"); err != nil {
 		t.Fatal(err)
@@ -304,9 +313,7 @@ func TestMerge(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	g := New(tmpDir)
-	if err := g.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, g)
 
 	// Configure git for CI environments where user is not set
 	if _, err := g.run("config", "user.name", "Test User"); err != nil {
@@ -431,9 +438,7 @@ func TestGitFetch(t *testing.T) {
 		t.Fatal(err)
 	}
 	upstreamGit := New(upstreamDir)
-	if err := upstreamGit.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, upstreamGit)
 	if _, err := upstreamGit.run("config", "user.name", "Test User"); err != nil {
 		t.Fatal(err)
 	}
@@ -464,9 +469,7 @@ func TestGitFetch(t *testing.T) {
 		t.Fatal(err)
 	}
 	localGit := New(localDir)
-	if err := localGit.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, localGit)
 
 	// Add upstream as remote
 	if err := localGit.RemoteAdd("origin", upstreamDir); err != nil {
@@ -567,9 +570,7 @@ func TestPull(t *testing.T) {
 		t.Fatal(err)
 	}
 	upstream := New(upstreamDir)
-	if err := upstream.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, upstream)
 	upstream.run("config", "user.name", "Test User")
 	upstream.run("config", "user.email", "test@example.com")
 	upstream.run("config", "receive.denyCurrentBranch", "ignore")
@@ -589,9 +590,7 @@ func TestPull(t *testing.T) {
 		t.Fatal(err)
 	}
 	downstream := New(downstreamDir)
-	if err := downstream.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, downstream)
 	downstream.run("config", "user.name", "Test User 2")
 	downstream.run("config", "user.email", "test2@example.com")
 	// Force fast-forward-only pulls so the fetched-commit count is deterministic
@@ -678,9 +677,7 @@ func TestPush(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := New(localDir)
-	if err := g.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, g)
 	if _, err := g.run("config", "user.name", "Test User"); err != nil {
 		t.Fatal(err)
 	}
@@ -767,9 +764,7 @@ func TestPush(t *testing.T) {
 func TestAddAll_ForceStagesIgnoredManifest(t *testing.T) {
 	dir := t.TempDir()
 	g := New(dir)
-	if err := g.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, g)
 	if _, err := g.run("config", "user.name", "Test User"); err != nil {
 		t.Fatal(err)
 	}
@@ -808,9 +803,7 @@ func TestAddAll_ForceStagesIgnoredManifest(t *testing.T) {
 func TestAddAll_ForceStagesIgnoredObjects(t *testing.T) {
 	dir := t.TempDir()
 	g := New(dir)
-	if err := g.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, g)
 	if _, err := g.run("config", "user.name", "Test User"); err != nil {
 		t.Fatal(err)
 	}
@@ -853,9 +846,7 @@ func TestAddAll_ForceStagesIgnoredObjects(t *testing.T) {
 func TestAddAll_ForceStagesIgnoredSealToml(t *testing.T) {
 	dir := t.TempDir()
 	g := New(dir)
-	if err := g.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, g)
 	if _, err := g.run("config", "user.name", "Test User"); err != nil {
 		t.Fatal(err)
 	}
@@ -909,9 +900,7 @@ func newPoisonedExtRepo(t *testing.T) (g *Git, sentinel string) {
 	t.Helper()
 	dir := t.TempDir()
 	g = New(dir)
-	if err := g.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, g)
 	if _, err := g.run("config", "user.name", "Test User"); err != nil {
 		t.Fatal(err)
 	}
@@ -1000,9 +989,7 @@ func TestRemoteOps_RejectExtViaGitAllowProtocol(t *testing.T) {
 func TestUnsafeRemoteExecution(t *testing.T) {
 	dir := t.TempDir()
 	g := New(dir)
-	if err := g.Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestRepo(t, g)
 
 	unsafeRemote := "ext::sh -c 'echo pwned > pwned.txt'"
 
