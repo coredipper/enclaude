@@ -17,6 +17,22 @@ func initTestRepo(t *testing.T, g *Git) {
 	if _, err := g.run("config", "gc.auto", "0"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := g.run("config", "commit.gpgsign", "false"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func initTestBareRepo(t *testing.T, g *Git) {
+	t.Helper()
+	if _, err := g.run("init", "--bare"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "gc.auto", "0"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.run("config", "commit.gpgsign", "false"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestGitOptionInjectionMitigation(t *testing.T) {
@@ -124,9 +140,7 @@ func TestRemoteRejectsExtTransport(t *testing.T) {
 
 	t.Run("RemoteAdd", func(t *testing.T) {
 		g := New(t.TempDir())
-		if err := g.Init(); err != nil {
-			t.Fatalf("Init failed: %v", err)
-		}
+		initTestRepo(t, g)
 		err := g.RemoteAdd("evil", extURL)
 		if err == nil {
 			t.Fatal("RemoteAdd accepted an ext:: URL; expected rejection")
@@ -143,9 +157,7 @@ func TestRemoteRejectsExtTransport(t *testing.T) {
 
 	t.Run("RemoteSetURL bypass is closed", func(t *testing.T) {
 		g := New(t.TempDir())
-		if err := g.Init(); err != nil {
-			t.Fatalf("Init failed: %v", err)
-		}
+		initTestRepo(t, g)
 		// Bypass attempt: add a benign remote, then edit it to ext::.
 		if err := g.RemoteAdd("origin", "https://example.invalid/r.git"); err != nil {
 			t.Fatalf("benign RemoteAdd failed: %v", err)
@@ -176,9 +188,7 @@ func TestRemoteRejectsDashPrefixedArgs(t *testing.T) {
 
 	t.Run("RemoteAdd rejects dashed name", func(t *testing.T) {
 		g := New(t.TempDir())
-		if err := g.Init(); err != nil {
-			t.Fatalf("Init failed: %v", err)
-		}
+		initTestRepo(t, g)
 		err := g.RemoteAdd(dashName, benignURL)
 		if err == nil {
 			t.Fatal("RemoteAdd accepted a dash-prefixed name; expected rejection")
@@ -190,9 +200,7 @@ func TestRemoteRejectsDashPrefixedArgs(t *testing.T) {
 
 	t.Run("RemoteAdd rejects dashed URL", func(t *testing.T) {
 		g := New(t.TempDir())
-		if err := g.Init(); err != nil {
-			t.Fatalf("Init failed: %v", err)
-		}
+		initTestRepo(t, g)
 		err := g.RemoteAdd("origin", dashURL)
 		if err == nil {
 			t.Fatal("RemoteAdd accepted a dash-prefixed URL; expected rejection")
@@ -204,9 +212,7 @@ func TestRemoteRejectsDashPrefixedArgs(t *testing.T) {
 
 	t.Run("RemoteSetURL rejects dashed name and URL", func(t *testing.T) {
 		g := New(t.TempDir())
-		if err := g.Init(); err != nil {
-			t.Fatalf("Init failed: %v", err)
-		}
+		initTestRepo(t, g)
 		if err := g.RemoteAdd("origin", benignURL); err != nil {
 			t.Fatalf("benign RemoteAdd failed: %v", err)
 		}
@@ -231,9 +237,7 @@ func TestRemoteRejectsDashPrefixedArgs(t *testing.T) {
 
 	t.Run("RemoteRemove rejects dashed name", func(t *testing.T) {
 		g := New(t.TempDir())
-		if err := g.Init(); err != nil {
-			t.Fatalf("Init failed: %v", err)
-		}
+		initTestRepo(t, g)
 		err := g.RemoteRemove(dashName)
 		if err == nil {
 			t.Fatal("RemoteRemove accepted a dash-prefixed name; expected rejection")
@@ -245,9 +249,7 @@ func TestRemoteRejectsDashPrefixedArgs(t *testing.T) {
 
 	t.Run("benign name and URL still accepted", func(t *testing.T) {
 		g := New(t.TempDir())
-		if err := g.Init(); err != nil {
-			t.Fatalf("Init failed: %v", err)
-		}
+		initTestRepo(t, g)
 		if err := g.RemoteAdd("origin", benignURL); err != nil {
 			t.Fatalf("RemoteAdd rejected a benign remote: %v", err)
 		}
@@ -263,9 +265,7 @@ func TestRemoteRejectsDashPrefixedArgs(t *testing.T) {
 func TestConfigMergeDriverQuoting(t *testing.T) {
 	tmp := t.TempDir()
 	g := New(tmp)
-	if err := g.Init(); err != nil {
-		t.Fatalf("Init failed: %v", err)
-	}
+	initTestRepo(t, g)
 
 	// This is a test for the quoting logic inside ConfigMergeDriver.
 	// Since os.Executable() is used, the driver string will start with the test executable path.
@@ -510,9 +510,7 @@ func TestGitInit(t *testing.T) {
 	t.Run("HappyPath", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		g := New(tmpDir)
-		if err := g.Init(); err != nil {
-			t.Fatalf("Init failed: %v", err)
-		}
+		initTestRepo(t, g)
 
 		// Verify .git directory is created
 		gitDir := filepath.Join(tmpDir, ".git")
@@ -528,14 +526,10 @@ func TestGitInit(t *testing.T) {
 	t.Run("Idempotency", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		g := New(tmpDir)
-		if err := g.Init(); err != nil {
-			t.Fatalf("First Init failed: %v", err)
-		}
+		initTestRepo(t, g)
 
 		// Second Init should also succeed
-		if err := g.Init(); err != nil {
-			t.Fatalf("Second Init failed, not idempotent: %v", err)
-		}
+		initTestRepo(t, g)
 	})
 
 	t.Run("ErrorCondition", func(t *testing.T) {
@@ -667,9 +661,7 @@ func TestPush(t *testing.T) {
 		t.Fatal(err)
 	}
 	remoteGit := New(remoteDir)
-	if _, err := remoteGit.run("init", "--bare"); err != nil {
-		t.Fatal(err)
-	}
+	initTestBareRepo(t, remoteGit)
 
 	// 2. Create a local repository
 	localDir := filepath.Join(tmpDir, "local")

@@ -8,7 +8,6 @@ import (
 
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
-	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/spf13/cobra"
 )
 
@@ -56,10 +55,7 @@ func TestPushE2E(t *testing.T) {
 	}
 
 	// Init git in sealDir
-	git := gitops.New(sealDir)
-	if err := git.Init(); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
+	git := initTestGitRepo(t, sealDir)
 	runGit(t, sealDir, "config", "user.name", "Test User")
 	runGit(t, sealDir, "config", "user.email", "test@example.com")
 	// Make an initial commit so we have a branch
@@ -67,7 +63,7 @@ func TestPushE2E(t *testing.T) {
 	branch, _ := git.CurrentBranch()
 
 	// Init bare remote
-	runGit(t, bareRemoteDir, "init", "--bare")
+	initTestBareGitRepo(t, bareRemoteDir)
 	runGit(t, bareRemoteDir, "config", "user.name", "Test User")
 	runGit(t, bareRemoteDir, "config", "user.email", "test@example.com")
 

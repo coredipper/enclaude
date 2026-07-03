@@ -8,7 +8,6 @@ import (
 
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
-	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/coredipper/enclaude/internal/store"
 )
 
@@ -26,10 +25,7 @@ func TestCommitSealStore_RescuesIgnoredMetadataWithoutContentChanges(t *testing.
 	}
 
 	dir := t.TempDir()
-	g := gitops.New(dir)
-	if err := g.Init(); err != nil {
-		t.Fatal(err)
-	}
+	g := initTestGitRepo(t, dir)
 	if err := os.WriteFile(filepath.Join(dir, "seal.toml"), []byte("config_version = 2\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -88,9 +84,7 @@ func TestCommitSealStore_NoOpSealCreatesNoCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	sealDir := t.TempDir()
-	if err := gitops.New(sealDir).Init(); err != nil {
-		t.Fatal(err)
-	}
+	initTestGitRepo(t, sealDir)
 	identity, err := crypto.GenerateKey()
 	if err != nil {
 		t.Fatalf("GenerateKey() error: %v", err)

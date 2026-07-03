@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/spf13/cobra"
 )
 
@@ -15,7 +16,7 @@ func TestReadmeRegenCommitDoesNotCaptureOtherStagedFiles(t *testing.T) {
 	readmePath := filepath.Join(repoDir, "README.md")
 	notesPath := filepath.Join(repoDir, "notes.txt")
 
-	runGit(t, repoDir, "init")
+	initTestGitRepo(t, repoDir)
 	runGit(t, repoDir, "config", "user.name", "Test User")
 	runGit(t, repoDir, "config", "user.email", "test@example.com")
 
@@ -54,6 +55,25 @@ func TestReadmeRegenCommitDoesNotCaptureOtherStagedFiles(t *testing.T) {
 		t.Fatalf("expected unrelated file to stay out of commit, got %q", got)
 	}
 }
+
+func initTestGitRepo(t *testing.T, repoDir string) *gitops.Git {
+	t.Helper()
+	g := gitops.New(repoDir)
+	if err := g.Init(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	runGit(t, repoDir, "config", "gc.auto", "0")
+	runGit(t, repoDir, "config", "commit.gpgsign", "false")
+	return g
+}
+
+func initTestBareGitRepo(t *testing.T, repoDir string) {
+	t.Helper()
+	runGit(t, repoDir, "init", "--bare")
+	runGit(t, repoDir, "config", "gc.auto", "0")
+	runGit(t, repoDir, "config", "commit.gpgsign", "false")
+}
+
 func runGit(t *testing.T, repoDir string, args ...string) string {
 	t.Helper()
 	path, err := exec.LookPath("git")

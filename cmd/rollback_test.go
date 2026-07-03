@@ -8,7 +8,6 @@ import (
 
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
-	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -58,10 +57,7 @@ func TestRollbackE2E(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	git := gitops.New(sealDir)
-	if err := git.Init(); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
+	git := initTestGitRepo(t, sealDir)
 	runGit(t, sealDir, "config", "user.name", "Test User")
 	runGit(t, sealDir, "config", "user.email", "test@example.com")
 
@@ -182,10 +178,7 @@ func TestRollbackAbort(t *testing.T) {
 	os.MkdirAll(sealDir, 0700)
 	cfg.Save(sealDir)
 
-	git := gitops.New(sealDir)
-	if err := git.Init(); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
+	git := initTestGitRepo(t, sealDir)
 	runGit(t, sealDir, "config", "user.name", "Test User")
 	runGit(t, sealDir, "config", "user.email", "test@example.com")
 
