@@ -1,7 +1,6 @@
 package merge
 
 import (
-	"bufio"
 	"strconv"
 	"strings"
 )
@@ -24,42 +23,43 @@ type Aggregate struct {
 //	[enclaude-merge] strategy=<name> path=<path> [ours=N theirs=N merged=N deduped=N] [sessions_added=N sessions_deduped=N]
 func ParseDriverLines(combinedOutput string) Aggregate {
 	agg := Aggregate{PerStrategy: map[string]int{}}
-	scanner := bufio.NewScanner(strings.NewReader(combinedOutput))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		const prefix = "[enclaude-merge]"
-		_, rest, found := strings.Cut(line, prefix)
-		if !found {
+	const prefix = "[enclaude-merge]"
+
+	// Optimization: avoid scanner/reader allocations and eliminate the per-line
+	// map allocation for parsed fields by scanning substrings directly.
+	for line := range strings.SplitSeq(combinedOutput, "\n") {
+		idx := strings.Index(line, prefix)
+		if idx == -1 {
 			continue
 		}
-		fields := parseFields(rest)
-		strategy := fields["strategy"]
+
+		rest := line[idx+len(prefix):]
+		var strategy string
+		var deduped, sessionsDeduped int
+
+		for tok := range strings.FieldsSeq(rest) {
+			k, v, ok := strings.Cut(tok, "=")
+			if !ok || k == "" {
+				continue
+			}
+			switch k {
+			case "strategy":
+				strategy = v
+			case "deduped":
+				deduped, _ = strconv.Atoi(v)
+			case "sessions_deduped":
+				sessionsDeduped, _ = strconv.Atoi(v)
+			}
+		}
+
 		if strategy == "" {
 			continue
 		}
+
 		agg.FilesMerged++
 		agg.PerStrategy[strategy]++
-		agg.LinesDeduped += atoi(fields["deduped"])
-		agg.SessionsDeduped += atoi(fields["sessions_deduped"])
+		agg.LinesDeduped += deduped
+		agg.SessionsDeduped += sessionsDeduped
 	}
 	return agg
-}
-
-// parseFields splits a sequence of `key=value` tokens separated by
-// whitespace. Values may not contain spaces (we control the producer).
-func parseFields(s string) map[string]string {
-	out := make(map[string]string)
-	for tok := range strings.FieldsSeq(s) {
-		k, v, ok := strings.Cut(tok, "=")
-		if !ok || k == "" {
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}
-
-func atoi(s string) int {
-	n, _ := strconv.Atoi(s)
-	return n
 }
