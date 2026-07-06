@@ -25,7 +25,10 @@ func ShredFile(path string) error {
 	buf := make([]byte, min(size, 64*1024))
 	for written := int64(0); written < size; {
 		n := min(int64(len(buf)), size-written)
-		rand.Read(buf[:n])
+		if _, err := rand.Read(buf[:n]); err != nil {
+			f.Close()
+			return fmt.Errorf("generating overwrite bytes for %s: %w", path, err)
+		}
 		if _, err := f.Write(buf[:n]); err != nil {
 			f.Close()
 			return fmt.Errorf("overwriting %s: %w", path, err)

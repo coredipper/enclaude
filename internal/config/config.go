@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -150,6 +151,9 @@ func (c *Config) Save(sealDir string) error {
 func generateDeviceID() string {
 	hostname, _ := os.Hostname()
 	b := make([]byte, 4)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp if random generation fails
+		return fmt.Sprintf("%s-%x", hostname, time.Now().UnixNano())
+	}
 	return fmt.Sprintf("%s-%x", hostname, b)
 }
