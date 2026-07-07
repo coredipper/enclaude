@@ -19,6 +19,19 @@ func NewObjectStore(sealDir string) *ObjectStore {
 	return &ObjectStore{dir: filepath.Join(sealDir, "objects")}
 }
 
+func isValidHash(hash string) bool {
+	if len(hash) != 64 {
+		return false
+	}
+	for i := 0; i < len(hash); i++ {
+		c := hash[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
 // ContentHash computes the SHA-256 hash of plaintext content.
 func ContentHash(data []byte) string {
 	h := sha256.Sum256(data)
@@ -32,6 +45,9 @@ func (s *ObjectStore) ObjectPath(hash string) string {
 
 // Exists checks if an object with the given hash exists.
 func (s *ObjectStore) Exists(hash string) bool {
+	if !isValidHash(hash) {
+		return false
+	}
 	_, err := os.Stat(s.ObjectPath(hash))
 	return err == nil
 }
@@ -40,6 +56,9 @@ func (s *ObjectStore) Exists(hash string) bool {
 // it exists — one stat for callers that reuse an existing object and need its
 // encrypted size without reading it.
 func (s *ObjectStore) Size(hash string) (int64, bool) {
+	if !isValidHash(hash) {
+		return 0, false
+	}
 	info, err := os.Stat(s.ObjectPath(hash))
 	if err != nil {
 		return 0, false
@@ -49,6 +68,9 @@ func (s *ObjectStore) Size(hash string) (int64, bool) {
 
 // Write stores encrypted data at the content-addressed path.
 func (s *ObjectStore) Write(hash string, encrypted []byte) error {
+	if !isValidHash(hash) {
+		return fmt.Errorf("invalid content hash: %q", hash)
+	}
 	path := s.ObjectPath(hash)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -59,11 +81,17 @@ func (s *ObjectStore) Write(hash string, encrypted []byte) error {
 
 // Read returns the encrypted data for a given content hash.
 func (s *ObjectStore) Read(hash string) ([]byte, error) {
+	if !isValidHash(hash) {
+		return nil, fmt.Errorf("invalid content hash: %q", hash)
+	}
 	return os.ReadFile(s.ObjectPath(hash))
 }
 
 // Delete removes an object by its content hash.
 func (s *ObjectStore) Delete(hash string) error {
+	if !isValidHash(hash) {
+		return fmt.Errorf("invalid content hash: %q", hash)
+	}
 	return os.Remove(s.ObjectPath(hash))
 }
 
