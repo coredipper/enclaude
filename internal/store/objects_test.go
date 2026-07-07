@@ -140,9 +140,9 @@ func TestObjectStore_ListAll(t *testing.T) {
 
 	// Write some objects
 	hashesToWrite := []string{
-		"11223344556677889900aabbccddeeff",
-		"11aabbccddeeff001122334455667788",
-		"223344556677889900aabbccddeeff11",
+		"11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff",
+		"11aabbccddeeff00112233445566778811aabbccddeeff001122334455667788",
+		"223344556677889900aabbccddeeff11223344556677889900aabbccddeeff11",
 	}
 
 	for _, hash := range hashesToWrite {
@@ -157,6 +157,10 @@ func TestObjectStore_ListAll(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(store.dir, "333"), 0700) // too long prefix
 	_ = os.WriteFile(filepath.Join(store.dir, "11", "notanagefile.txt"), []byte("garbage"), 0600)
 	_ = os.MkdirAll(filepath.Join(store.dir, "11", "isdir.age"), 0700)
+	_ = os.MkdirAll(filepath.Join(store.dir, "aa"), 0700)
+	_ = os.WriteFile(filepath.Join(store.dir, "aa", "short.age"), []byte("garbage"), 0600)
+	_ = os.MkdirAll(filepath.Join(store.dir, "bb"), 0700)
+	_ = os.WriteFile(filepath.Join(store.dir, "bb", "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB.age"), []byte("garbage"), 0600)
 
 	// ListAll again
 	hashes, err = store.ListAll()
@@ -175,5 +179,47 @@ func TestObjectStore_ListAll(t *testing.T) {
 		if hashes[i] != hashesToWrite[i] {
 			t.Errorf("ListAll() hash at %d = %q, want %q", i, hashes[i], hashesToWrite[i])
 		}
+	}
+}
+
+func TestIsValidHash(t *testing.T) {
+	valid := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	if !isValidHash(valid) {
+		t.Errorf("isValidHash(%q) = false, want true", valid)
+	}
+
+	invalidLen := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85"
+	if isValidHash(invalidLen) {
+		t.Errorf("isValidHash(%q) = true, want false", invalidLen)
+	}
+
+	invalidChar := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85G"
+	if isValidHash(invalidChar) {
+		t.Errorf("isValidHash(%q) = true, want false", invalidChar)
+	}
+}
+
+func TestObjectStore_InvalidHash(t *testing.T) {
+	store := NewObjectStore(t.TempDir())
+	invalid := "../../../../etc/passwd"
+
+	if store.Exists(invalid) {
+		t.Errorf("Exists() returned true for invalid hash")
+	}
+
+	if _, ok := store.Size(invalid); ok {
+		t.Errorf("Size() returned ok=true for invalid hash")
+	}
+
+	if err := store.Write(invalid, []byte("data")); err == nil {
+		t.Errorf("Write() returned no error for invalid hash")
+	}
+
+	if _, err := store.Read(invalid); err == nil {
+		t.Errorf("Read() returned no error for invalid hash")
+	}
+
+	if err := store.Delete(invalid); err == nil {
+		t.Errorf("Delete() returned no error for invalid hash")
 	}
 }

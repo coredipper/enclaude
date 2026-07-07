@@ -153,6 +153,44 @@ func TestRepairFixesMissing(t *testing.T) {
 	}
 }
 
+func TestRepairInvalidManifestHashVerbose(t *testing.T) {
+	claudeDir := t.TempDir()
+	sealDir := t.TempDir()
+
+	plaintext := []byte("repair me")
+	relPath := "bad.txt"
+	if err := os.WriteFile(filepath.Join(claudeDir, relPath), plaintext, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	identity, _ := crypto.GenerateKey()
+	cfg := config.DefaultConfig(claudeDir, sealDir)
+	manifest := NewManifest("device-1")
+	manifest.Files[relPath] = FileEntry{ContentHash: "bad"}
+	if err := manifest.Save(sealDir); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Repair(cfg, identity, true, true)
+	if err != nil {
+		t.Fatalf("Repair() error: %v", err)
+	}
+	if result.Fixed != 1 {
+		t.Fatalf("Fixed = %d, want 1", result.Fixed)
+	}
+
+	repaired, err := LoadManifest(sealDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := repaired.Files[relPath].ContentHash; got != ContentHash(plaintext) {
+		t.Errorf("repaired hash = %q, want %q", got, ContentHash(plaintext))
+	}
+	if !NewObjectStore(sealDir).Exists(ContentHash(plaintext)) {
+		t.Error("repaired object was not written")
+	}
+}
+
 func TestRepairUpdatesManifestWhenPlaintextChanged(t *testing.T) {
 	claudeDir := setupTestDir(t)
 	sealDir := t.TempDir()
