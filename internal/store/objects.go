@@ -125,6 +125,9 @@ func (s *ObjectStore) ListAll() ([]string, error) {
 			name := entry.Name()
 			if !entry.IsDir() && len(name) > 4 && name[len(name)-4:] == ".age" {
 				hash := prefix.Name() + name[:len(name)-4]
+				if !isValidHash(hash) {
+					continue
+				}
 				hashes = append(hashes, hash)
 			}
 		}

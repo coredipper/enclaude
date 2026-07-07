@@ -157,6 +157,10 @@ func TestObjectStore_ListAll(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(store.dir, "333"), 0700) // too long prefix
 	_ = os.WriteFile(filepath.Join(store.dir, "11", "notanagefile.txt"), []byte("garbage"), 0600)
 	_ = os.MkdirAll(filepath.Join(store.dir, "11", "isdir.age"), 0700)
+	_ = os.MkdirAll(filepath.Join(store.dir, "aa"), 0700)
+	_ = os.WriteFile(filepath.Join(store.dir, "aa", "short.age"), []byte("garbage"), 0600)
+	_ = os.MkdirAll(filepath.Join(store.dir, "bb"), 0700)
+	_ = os.WriteFile(filepath.Join(store.dir, "bb", "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB.age"), []byte("garbage"), 0600)
 
 	// ListAll again
 	hashes, err = store.ListAll()

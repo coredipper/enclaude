@@ -1296,7 +1296,7 @@ func Verify(cfg *config.Config, identity age.Identity, verbose bool) (*RepairRes
 		if !store.Exists(entry.ContentHash) {
 			result.MissingObjects = append(result.MissingObjects, path)
 			if verbose {
-				fmt.Fprintf(os.Stderr, "  [missing] %s (hash: %s)\n", path, entry.ContentHash[:16])
+				fmt.Fprintf(os.Stderr, "  [missing] %s (hash: %s)\n", path, shortHash(entry.ContentHash))
 			}
 			continue
 		}
@@ -1338,7 +1338,7 @@ func Verify(cfg *config.Config, identity age.Identity, verbose bool) (*RepairRes
 		if !referenced[hash] {
 			result.OrphanObjects = append(result.OrphanObjects, hash)
 			if verbose {
-				fmt.Fprintf(os.Stderr, "  [orphan] %s\n", hash[:16])
+				fmt.Fprintf(os.Stderr, "  [orphan] %s\n", shortHash(hash))
 			}
 		}
 	}
@@ -1392,7 +1392,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 
 		// Track superseded hash before updating manifest
 		oldHash := manifest.Files[path].ContentHash
-		if oldHash != hash && oldHash != "" {
+		if oldHash != hash && isValidHash(oldHash) {
 			superseded = append(superseded, oldHash)
 		}
 
@@ -1449,7 +1449,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 			}
 			store.Delete(hash)
 			if verbose {
-				fmt.Printf("  [deleted] orphan %s\n", hash[:16])
+				fmt.Printf("  [deleted] orphan %s\n", shortHash(hash))
 			}
 		}
 	}
