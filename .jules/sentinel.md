@@ -18,3 +18,7 @@
 **Vulnerability:** The `ObjectStore` methods (`Write`, `Read`, `Delete`, `Exists`, `Size`) constructed file paths using `filepath.Join(s.dir, hash[:2], hash[2:]+".age")` without verifying that `hash` was a valid SHA-256 hex string. A malicious manifest could provide a `content_hash` like `"../../etc/passwd"`, causing the joined path to escape the `objects/` directory and allowing arbitrary file reads/writes/deletions.
 **Learning:** Even when a string is intended to be an internal ID or hash, if it originates from external/untrusted sources (like a synced manifest) and is used in path construction, it must be strictly validated.
 **Prevention:** Enforce strict validation on object IDs (e.g., ensuring they are exactly 64 characters of lowercase hexadecimal `[0-9a-f]`) before using them in filesystem operations.
+## 2026-07-06 - Unhandled rand.Read Error Vulnerability
+**Vulnerability:** Unchecked errors from `crypto/rand.Read`. If it fails, the provided buffer remains uninitialized (typically all zeros).
+**Learning:** In security-sensitive operations (e.g., generating device IDs or shredding files with random data), silently proceeding after `rand.Read` fails can lead to predictable identifiers or insecure data wiping.
+**Prevention:** Always check the error returned by `rand.Read` and handle it securely, either by aborting the operation or using a safe fallback (like a high-precision timestamp for non-cryptographic identifiers).
