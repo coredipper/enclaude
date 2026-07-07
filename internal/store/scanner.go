@@ -126,10 +126,18 @@ type compiledPattern struct {
 func compilePatterns(patterns []string) []compiledPattern {
 	res := make([]compiledPattern, len(patterns))
 	for i, p := range patterns {
+		hasWildcard := false
+		for j := 0; j < len(p); j++ {
+			c := p[j]
+			if c == '*' || c == '?' || c == '[' || c == '\\' {
+				hasWildcard = true
+				break
+			}
+		}
 		res[i] = compiledPattern{
 			raw:           p,
 			hasDoubleStar: strings.Contains(p, "**"),
-			hasWildcard:   strings.ContainsAny(p, "*?[\\"),
+			hasWildcard:   hasWildcard,
 		}
 	}
 	return res
@@ -162,7 +170,15 @@ func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
 // MatchGlob matches a path against a glob pattern with ** support.
 // It avoids strings.Split on both path and pattern strings to eliminate slice allocations.
 func MatchGlob(path, pattern string) bool {
-	if !strings.ContainsAny(pattern, "*?[\\") {
+	hasWildcard := false
+	for i := 0; i < len(pattern); i++ {
+		c := pattern[i]
+		if c == '*' || c == '?' || c == '[' || c == '\\' {
+			hasWildcard = true
+			break
+		}
+	}
+	if !hasWildcard {
 		return path == pattern
 	}
 
