@@ -25,7 +25,9 @@ func BenchmarkStatus(b *testing.B) {
 
 	for i := 0; i < 1000; i++ {
 		content := make([]byte, 100*1024)
-		rand.Read(content)
+		if _, err := rand.Read(content); err != nil {
+			b.Fatalf("failed to generate random data: %v", err)
+		}
 		os.WriteFile(filepath.Join(claudeDir, fmt.Sprintf("file-%d.txt", i)), content, 0644)
 	}
 
@@ -69,7 +71,9 @@ func BenchmarkUnsealStatus(b *testing.B) {
 
 	for i := 0; i < 1000; i++ {
 		content := make([]byte, 100*1024)
-		rand.Read(content)
+		if _, err := rand.Read(content); err != nil {
+			b.Fatalf("failed to generate random data: %v", err)
+		}
 		os.WriteFile(filepath.Join(claudeDir, fmt.Sprintf("file-%d.txt", i)), content, 0644)
 	}
 
