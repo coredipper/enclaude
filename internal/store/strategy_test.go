@@ -55,18 +55,18 @@ func TestResolveMergeStrategyDefaultLastWriteWins(t *testing.T) {
 }
 
 func TestPatternSpecificityLiteralBeatsWildcard(t *testing.T) {
-	literal := patternSpecificity("history.jsonl")
-	wildcard := patternSpecificity("**/*.jsonl")
-	if literal <= wildcard {
-		t.Errorf("literal score %q should beat wildcard score %q", literal, wildcard)
+	lT, lS := patternSpecificity("history.jsonl")
+	wT, wS := patternSpecificity("**/*.jsonl")
+	if lT < wT || (lT == wT && lS <= wS) {
+		t.Errorf("literal score (%d, %d) should beat wildcard score (%d, %d)", lT, lS, wT, wS)
 	}
 }
 
 func TestPatternSpecificityDeeperBeatsShallower(t *testing.T) {
-	deeper := patternSpecificity("projects/*/sessions-index.json")
-	shallower := patternSpecificity("*/*.json")
-	if deeper <= shallower {
-		t.Errorf("deeper pattern %q should beat shallower %q", deeper, shallower)
+	dT, dS := patternSpecificity("projects/*/sessions-index.json")
+	sT, sS := patternSpecificity("*/*.json")
+	if dT < sT || (dT == sT && dS <= sS) {
+		t.Errorf("deeper pattern (%d, %d) should beat shallower (%d, %d)", dT, dS, sT, sS)
 	}
 }
 
