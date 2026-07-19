@@ -1182,12 +1182,12 @@ func ResolveMergeStrategyWithPattern(relPath string, strategies map[string]strin
 	// Collect all matching glob patterns, pick the most specific
 	bestPattern := ""
 	bestStrategy := ""
-	bestScore := ""
+	bestScore := -1
 
 	for p, s := range strategies {
 		if MatchGlob(relPath, p) {
 			score := patternSpecificity(p)
-			if score > bestScore {
+			if score > bestScore || (score == bestScore && p > bestPattern) {
 				bestScore = score
 				bestPattern = p
 				bestStrategy = s
@@ -1206,11 +1206,10 @@ func ResolveMergeStrategyWithPattern(relPath string, strategies map[string]strin
 	return "last_write_wins", ""
 }
 
-// patternSpecificity returns a comparable score slice for a glob pattern.
-// Compared lexicographically, more specific patterns sort higher.
+// patternSpecificity returns a comparable score for a glob pattern.
 // Per-segment scoring: literal=3, constrained glob (contains [)=2, *=1, **=0.
-// Ties broken by segment count (more = more specific) then pattern string.
-func patternSpecificity(pattern string) string {
+// Higher total wins; ties broken by more segments.
+func patternSpecificity(pattern string) int {
 	// Optimization: avoid strings.Split to eliminate slice allocations.
 	total := 0
 	segments := 0
@@ -1243,9 +1242,9 @@ func patternSpecificity(pattern string) string {
 		}
 		rem = rem[idx+1:]
 	}
-	// Fixed-width: total score (2 digits), segment count (2 digits), pattern.
-	// Higher total wins; ties broken by more segments, then lexical.
-	return fmt.Sprintf("%02d:%02d:%s", total, segments, pattern)
+	// Pack into single int: total (higher bits) | segments (lower bits).
+	// Ties on score are broken lexically by the caller.
+	return (total << 16) | segments
 }
 
 // isSessionCompleteFor determines whether a session JSONL file looks
