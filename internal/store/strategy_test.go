@@ -58,7 +58,7 @@ func TestPatternSpecificityLiteralBeatsWildcard(t *testing.T) {
 	literal := patternSpecificity("history.jsonl")
 	wildcard := patternSpecificity("**/*.jsonl")
 	if literal <= wildcard {
-		t.Errorf("literal score %q should beat wildcard score %q", literal, wildcard)
+		t.Errorf("literal score %d should beat wildcard score %d", literal, wildcard)
 	}
 }
 
@@ -66,7 +66,7 @@ func TestPatternSpecificityDeeperBeatsShallower(t *testing.T) {
 	deeper := patternSpecificity("projects/*/sessions-index.json")
 	shallower := patternSpecificity("*/*.json")
 	if deeper <= shallower {
-		t.Errorf("deeper pattern %q should beat shallower %q", deeper, shallower)
+		t.Errorf("deeper pattern %d should beat shallower %d", deeper, shallower)
 	}
 }
 
