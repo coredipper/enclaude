@@ -22,3 +22,8 @@
 **Vulnerability:** Unchecked errors from `crypto/rand.Read`. If it fails, the provided buffer remains uninitialized (typically all zeros).
 **Learning:** In security-sensitive operations (e.g., generating device IDs or shredding files with random data), silently proceeding after `rand.Read` fails can lead to predictable identifiers or insecure data wiping.
 **Prevention:** Always check the error returned by `rand.Read` and handle it securely, either by aborting the operation or using a safe fallback (like a high-precision timestamp for non-cryptographic identifiers).
+
+## 2026-07-06 - Unhandled rand.Read Error in Benchmarks Vulnerability
+**Vulnerability:** Unchecked errors from `math/rand.Read` or `crypto/rand.Read` in benchmark tests.
+**Learning:** Unhandled random generation errors in benchmarks can lead to measuring the performance of predictable (zeroed) data generation or processing instead of actual random data processing, potentially skewing benchmark results or hiding actual errors.
+**Prevention:** Even in tests and benchmarks, always check the error returned by `rand.Read` and use `b.Fatalf` or `t.Fatalf` to abort the execution if it fails.
