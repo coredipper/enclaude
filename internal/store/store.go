@@ -596,7 +596,27 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 	if numWorkers < 1 {
 		numWorkers = 1
 	}
-	sem := make(chan struct{}, numWorkers)
+
+	work := make(chan ScanResult, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for f := range work {
+				data, err := os.ReadFile(f.AbsPath)
+				if err != nil {
+					continue
+				}
+				hash := ContentHash(data)
+
+				mu.Lock()
+				current.Files[f.RelPath] = FileEntry{
+					ContentHash: hash,
+				}
+				mu.Unlock()
+			}
+		}()
+	}
 
 	for _, f := range files {
 		// Fast path: if size and nanosecond mtime match manifest, assume
@@ -613,25 +633,9 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 			}
 		}
 
-		wg.Add(1)
-		go func(f ScanResult) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			data, err := os.ReadFile(f.AbsPath)
-			if err != nil {
-				return
-			}
-			hash := ContentHash(data)
-
-			mu.Lock()
-			current.Files[f.RelPath] = FileEntry{
-				ContentHash: hash,
-			}
-			mu.Unlock()
-		}(f)
+		work <- f
 	}
+	close(work)
 	wg.Wait()
 
 	diff := current.Diff(manifest)
@@ -683,7 +687,25 @@ func UnsealStatus(cfg *config.Config, opts ...UnsealOption) (*DiffResult, error)
 	if numWorkers < 1 {
 		numWorkers = 1
 	}
-	sem := make(chan struct{}, numWorkers)
+
+	work := make(chan ScanResult, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for f := range work {
+				data, err := os.ReadFile(f.AbsPath)
+				if err != nil {
+					continue
+				}
+				hash := ContentHash(data)
+
+				mu.Lock()
+				onDisk[f.RelPath] = hash
+				mu.Unlock()
+			}
+		}()
+	}
 
 	for _, f := range files {
 		// Fast path: see Status above for the rationale and the
@@ -697,23 +719,9 @@ func UnsealStatus(cfg *config.Config, opts ...UnsealOption) (*DiffResult, error)
 			}
 		}
 
-		wg.Add(1)
-		go func(f ScanResult) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			data, err := os.ReadFile(f.AbsPath)
-			if err != nil {
-				return
-			}
-			hash := ContentHash(data)
-
-			mu.Lock()
-			onDisk[f.RelPath] = hash
-			mu.Unlock()
-		}(f)
+		work <- f
 	}
+	close(work)
 	wg.Wait()
 
 	var result DiffResult
