@@ -101,12 +101,14 @@ func fastRel(base, path string) (string, error) {
 	if base == path {
 		return ".", nil
 	}
-	if strings.HasPrefix(path, base) {
-		if len(base) > 0 && os.IsPathSeparator(base[len(base)-1]) {
-			return path[len(base):], nil
+	lb := len(base)
+	lp := len(path)
+	if lp > lb && path[:lb] == base {
+		if lb > 0 && os.IsPathSeparator(base[lb-1]) {
+			return path[lb:], nil
 		}
-		if len(path) > len(base) && os.IsPathSeparator(path[len(base)]) {
-			return path[len(base)+1:], nil
+		if os.IsPathSeparator(path[lb]) {
+			return path[lb+1:], nil
 		}
 	}
 	return filepath.Rel(base, path)
@@ -145,12 +147,21 @@ func compilePatterns(patterns []string) []compiledPattern {
 
 // matchesAnyCompiled checks if a relative path matches any of the compiled glob patterns.
 func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
-	for _, p := range patterns {
+	// Fast path: First pass for exact matches (wildcard-free patterns).
+	// This avoids expensive filepath.Match or recursive segment walking for
+	// wildcards that appear earlier in the list when an exact match exists later.
+	for i := range patterns {
+		p := &patterns[i]
+		if !p.hasWildcard && p.raw == relPath {
+			return true
+		}
+	}
+
+	// Second pass: Evaluate patterns with wildcards.
+	for i := range patterns {
+		p := &patterns[i]
 		if !p.hasWildcard {
-			if p.raw == relPath {
-				return true
-			}
-			continue
+			continue // Handled by exact match loop above
 		}
 
 		if !p.hasDoubleStar {
