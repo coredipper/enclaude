@@ -1,3 +1,5 @@
+
+
 # enclaude
 
 Encrypted, git-backed, cross-device sync for `~/.claude/`.
@@ -236,6 +238,8 @@ patterns = [
 "settings.json" = "last_write_wins"
 "projects/*/memory/**" = "text_merge"
 ```
+
+The example above is abbreviated; the default configuration includes additional include/exclude patterns and merge strategies.
 
 ## Security Model
 
