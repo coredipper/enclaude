@@ -98,16 +98,17 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 // where path is a simple descendant of base. WalkDir guarantees paths are
 // joined cleanly, so we can often avoid filepath.Clean and allocation overhead.
 func fastRel(base, path string) (string, error) {
+	baseLen := len(base)
+	if len(path) > baseLen && path[:baseLen] == base {
+		if os.IsPathSeparator(path[baseLen]) {
+			return path[baseLen+1:], nil
+		}
+		if baseLen > 0 && os.IsPathSeparator(base[baseLen-1]) {
+			return path[baseLen:], nil
+		}
+	}
 	if base == path {
 		return ".", nil
-	}
-	if strings.HasPrefix(path, base) {
-		if len(base) > 0 && os.IsPathSeparator(base[len(base)-1]) {
-			return path[len(base):], nil
-		}
-		if len(path) > len(base) && os.IsPathSeparator(path[len(base)]) {
-			return path[len(base)+1:], nil
-		}
 	}
 	return filepath.Rel(base, path)
 }
