@@ -254,6 +254,22 @@ func matchSegmentsPatRem(path string, morePath bool, pattern string, morePat boo
 			path = path[idxPath+1:] // Move past '/'; at least the tail remains
 		}
 
+		// Fast path to avoid filepath.Match overhead for patterns without wildcards in this segment
+		hasWildcard := false
+		for i := 0; i < len(pat); i++ {
+			c := pat[i]
+			if c == '*' || c == '?' || c == '[' || c == '\\' {
+				hasWildcard = true
+				break
+			}
+		}
+		if !hasWildcard {
+			if pat != currentSegment {
+				return false
+			}
+			continue
+		}
+
 		// Match current segment with filepath.Match (handles * and ? within a segment)
 		matched, _ := filepath.Match(pat, currentSegment)
 		if !matched {
