@@ -198,13 +198,24 @@ func parseJSONLineBytes(line []byte, obj map[string]interface{}) ([32]byte, floa
 }
 
 func extractSessionId(raw json.RawMessage) string {
-	var obj struct {
-		SessionID string `json:"sessionId"`
+	// Fast-path to avoid json.Unmarshal reflection and map allocations overhead.
+	// Sessions index files contain flat JSON objects.
+	idx := bytes.Index(raw, []byte(`"sessionId":"`))
+	if idx == -1 {
+		idx = bytes.Index(raw, []byte(`"sessionId": "`))
+		if idx == -1 {
+			return ""
+		}
+		idx += 14 // len(`"sessionId": "`)
+	} else {
+		idx += 13 // len(`"sessionId":"`)
 	}
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		return obj.SessionID
+
+	end := bytes.IndexByte(raw[idx:], '"')
+	if end == -1 {
+		return ""
 	}
-	return ""
+	return string(raw[idx : idx+end])
 }
 
 func parseIndexFile(data []byte) (map[string]json.RawMessage, []json.RawMessage, error) {
