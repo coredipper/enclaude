@@ -27,3 +27,7 @@
 **Vulnerability:** Unchecked errors from `math/rand.Read` or `crypto/rand.Read` in benchmark tests.
 **Learning:** Unhandled random generation errors in benchmarks can lead to measuring the performance of predictable (zeroed) data generation or processing instead of actual random data processing, potentially skewing benchmark results or hiding actual errors.
 **Prevention:** Even in tests and benchmarks, always check the error returned by `rand.Read` and use `b.Fatalf` or `t.Fatalf` to abort the execution if it fails.
+## 2026-07-07 - Prevent Path Traversal in Rotate Object Paths
+**Vulnerability:** The `stagedObjectPath` function used in object rotation didn't validate if `hash` was a valid SHA-256 hex string before constructing paths, leading to path traversal vulnerability if a malicious manifest provides `../../etc/passwd` style `content_hash`.
+**Learning:** Functions that generate paths based on external inputs such as manifest contents, even in auxiliary workflows like migration or rotation, must always validate those inputs against the expected format.
+**Prevention:** In functions like `stagedObjectPath`, always apply the same validation `isValidHash` as used in the primary `ObjectStore` read/write paths, and return an error if validation fails.
