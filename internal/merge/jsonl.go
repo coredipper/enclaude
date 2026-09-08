@@ -19,13 +19,13 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 	// Cache to avoid unmarshaling and hashing the exact same string repeatedly.
 	// history.jsonl is append-only, so the majority of lines from `theirs`
 	// will exactly match the raw bytes of earlier lines from `ours` or themselves.
-	// We use the already computed hash as the key to bound memory usage and avoid
-	// unbounded string map allocations. We just map the raw line's hash to the parsed timestamp.
+	// We use the raw line string as the key to avoid sha256 hashing overhead.
+	// string(byteSlice) as a map key is optimized in Go to avoid allocations.
 	type parsedLine struct {
 		hash [32]byte
 		ts   float64
 	}
-	rawCache := make(map[[32]byte]parsedLine)
+	rawCache := make(map[string]parsedLine)
 
 	// Create a single map and reuse it across all lines to eliminate
 	// map allocation overhead in parseJSONLineBytes. We allocate it once here.
@@ -51,18 +51,17 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 				continue
 			}
 
-			// Calculate the cheap raw hash first
-			rawHash := sha256.Sum256(lineBytes)
-
 			var hash [32]byte
 			var timestamp float64
 
-			if cached, ok := rawCache[rawHash]; ok {
+			if cached, ok := rawCache[string(lineBytes)]; ok {
 				hash = cached.hash
 				timestamp = cached.ts
 			} else {
 				hash, timestamp = parseJSONLineBytes(lineBytes, objMap)
-				rawCache[rawHash] = parsedLine{hash, timestamp}
+				// Here string(lineBytes) will allocate, but we only do this once
+				// per unique raw line.
+				rawCache[string(lineBytes)] = parsedLine{hash, timestamp}
 			}
 
 			if _, exists := seen[hash]; exists {
