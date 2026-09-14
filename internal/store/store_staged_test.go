@@ -5,6 +5,10 @@ import (
 	"testing"
 )
 
+// TestStagedObjectPath guards the staging path builder against hashes that
+// are not 64-char hex. Rotation reaches it only after ObjectStore.Read has
+// already rejected such a hash, so this pins the defense-in-depth check that
+// keeps a future caller from reaching staging without that guard.
 func TestStagedObjectPath(t *testing.T) {
 	root := "/tmp/rotate-staging"
 	validHash := strings.Repeat("a", 64)
