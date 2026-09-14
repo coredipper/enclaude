@@ -1,5 +1,3 @@
-
-
 # enclaude
 
 Encrypted, git-backed, cross-device sync for `~/.claude/`.
