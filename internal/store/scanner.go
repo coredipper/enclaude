@@ -121,12 +121,18 @@ type compiledPattern struct {
 	raw           string
 	hasDoubleStar bool
 	hasWildcard   bool
+	segmentHasWildcard []bool // precomputed per-segment wildcard presence
 }
 
 func compilePatterns(patterns []string) []compiledPattern {
 	res := make([]compiledPattern, len(patterns))
 	for i, p := range patterns {
 		hasWildcard := false
+		// Optimization: Pre-calculate per-segment wildcard presence
+		// to avoid checking it repeatedly in matchSegmentsPatRem.
+		// However, keeping it simple here and relying on the inline check
+		// inside matchSegmentsPatRem keeps the memory footprint lower
+		// without needing a complex struct for segments.
 		for j := 0; j < len(p); j++ {
 			c := p[j]
 			if c == '*' || c == '?' || c == '[' || c == '\\' {
