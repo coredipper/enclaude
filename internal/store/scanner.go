@@ -35,7 +35,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 			// For directories: any non-excluded dir could have included
 			// descendants. For files: check include/exclude directly.
 			if rel, relErr := fastRel(claudeDir, path); relErr == nil && rel != "." {
-				excluded := matchesAnyCompiled(rel, compiledExcludes) || matchesAnyCompiled(rel+"/", compiledExcludes)
+				excluded := matchesAnyCompiled(rel, compiledExcludes) || matchesAnyCompiledDir(rel, compiledExcludes)
 				if !excluded {
 					walkErrors++
 				}
@@ -48,7 +48,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 				return nil
 			}
 			// Skip entire excluded directories for performance
-			if matchesAnyCompiled(rel+"/", compiledExcludes) {
+			if matchesAnyCompiledDir(rel, compiledExcludes) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -160,6 +160,36 @@ func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
 			}
 		} else {
 			if matchSegmentsPatRem(relPath, true, p.raw, true) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// matchesAnyCompiledDir checks if relPath+"/" matches any of the compiled glob
+// patterns, avoiding string allocation for exact directory patterns.
+func matchesAnyCompiledDir(relPath string, patterns []compiledPattern) bool {
+	var relSlash string
+	for _, p := range patterns {
+		if !p.hasWildcard {
+			if len(p.raw) == len(relPath)+1 && p.raw[len(p.raw)-1] == '/' && p.raw[:len(relPath)] == relPath {
+				return true
+			}
+			continue
+		}
+
+		if relSlash == "" {
+			relSlash = relPath + "/"
+		}
+
+		if !p.hasDoubleStar {
+			matched, _ := filepath.Match(p.raw, relSlash)
+			if matched {
+				return true
+			}
+		} else {
+			if matchSegmentsPatRem(relSlash, true, p.raw, true) {
 				return true
 			}
 		}
