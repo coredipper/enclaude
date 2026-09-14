@@ -2,3 +2,5 @@ enclaude
 dist/
 *.key
 .jules/
+*.prof
+*.test

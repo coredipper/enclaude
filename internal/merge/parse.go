@@ -27,21 +27,52 @@ func ParseDriverLines(combinedOutput string) Aggregate {
 
 	// Optimization: avoid scanner/reader allocations and eliminate the per-line
 	// map allocation for parsed fields by scanning substrings directly.
-	for line := range strings.SplitSeq(combinedOutput, "\n") {
-		idx := strings.Index(line, prefix)
+	for len(combinedOutput) > 0 {
+		var line string
+		idx := strings.IndexByte(combinedOutput, '\n')
 		if idx == -1 {
+			line = combinedOutput
+			combinedOutput = ""
+		} else {
+			line = combinedOutput[:idx]
+			combinedOutput = combinedOutput[idx+1:]
+		}
+
+		prefixIdx := strings.Index(line, prefix)
+		if prefixIdx == -1 {
 			continue
 		}
 
-		rest := line[idx+len(prefix):]
+		rest := line[prefixIdx+len(prefix):]
 		var strategy string
 		var deduped, sessionsDeduped int
 
-		for tok := range strings.FieldsSeq(rest) {
-			k, v, ok := strings.Cut(tok, "=")
-			if !ok || k == "" {
+		// Fast field parsing to avoid FieldsSeq allocation overhead
+		for len(rest) > 0 {
+			// skip spaces
+			start := 0
+			for start < len(rest) && (rest[start] == ' ' || rest[start] == '\t' || rest[start] == '\r') {
+				start++
+			}
+			if start == len(rest) {
+				break
+			}
+			rest = rest[start:]
+
+			// find end of token
+			end := 0
+			for end < len(rest) && rest[end] != ' ' && rest[end] != '\t' && rest[end] != '\r' {
+				end++
+			}
+			tok := rest[:end]
+			rest = rest[end:]
+
+			eqIdx := strings.IndexByte(tok, '=')
+			if eqIdx == -1 || eqIdx == 0 {
 				continue
 			}
+			k, v := tok[:eqIdx], tok[eqIdx+1:]
+
 			switch k {
 			case "strategy":
 				strategy = v
