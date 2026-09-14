@@ -121,7 +121,6 @@ type compiledPattern struct {
 	raw           string
 	hasDoubleStar bool
 	hasWildcard   bool
-	segmentHasWildcard []bool // precomputed per-segment wildcard presence
 }
 
 func compilePatterns(patterns []string) []compiledPattern {
