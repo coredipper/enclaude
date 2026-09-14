@@ -97,6 +97,9 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 // fastRel is a highly optimized version of filepath.Rel for the common case
 // where path is a simple descendant of base. WalkDir guarantees paths are
 // joined cleanly, so we can often avoid filepath.Clean and allocation overhead.
+// Note that doubled separators at the base boundary collapse differently
+// than the old strings.HasPrefix behaviour (e.g. base="/a/" path="/a//b"
+// yields "b" rather than "/b"), matching filepath.Rel more closely.
 func fastRel(base, path string) (string, error) {
 	baseLen := len(base)
 	if len(path) > baseLen && path[:baseLen] == base {

@@ -437,3 +437,24 @@ func BenchmarkScannerMatchesAny_ExactPattern(b *testing.B) {
 	}
 	_ = sink
 }
+
+func TestFastRel_DoubledSeparator(t *testing.T) {
+	tests := []struct {
+		base string
+		path string
+		want string
+	}{
+		{"/a/", "/a//b", "b"},
+		{"/", "//", ""},
+	}
+
+	for _, tt := range tests {
+		got, err := fastRel(tt.base, tt.path)
+		if err != nil {
+			t.Errorf("fastRel(%q, %q) unexpected error: %v", tt.base, tt.path, err)
+		}
+		if got != tt.want {
+			t.Errorf("fastRel(%q, %q) = %q, want %q", tt.base, tt.path, got, tt.want)
+		}
+	}
+}
