@@ -596,7 +596,8 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 	if numWorkers < 1 {
 		numWorkers = 1
 	}
-	sem := make(chan struct{}, numWorkers)
+
+	var work chan ScanResult
 
 	for _, f := range files {
 		// Fast path: if size and nanosecond mtime match manifest, assume
@@ -613,24 +614,33 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 			}
 		}
 
-		wg.Add(1)
-		go func(f ScanResult) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+		if work == nil {
+			work = make(chan ScanResult, numWorkers)
+			for i := 0; i < numWorkers; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for f := range work {
+						data, err := os.ReadFile(f.AbsPath)
+						if err != nil {
+							continue
+						}
+						hash := ContentHash(data)
 
-			data, err := os.ReadFile(f.AbsPath)
-			if err != nil {
-				return
+						mu.Lock()
+						current.Files[f.RelPath] = FileEntry{
+							ContentHash: hash,
+						}
+						mu.Unlock()
+					}
+				}()
 			}
-			hash := ContentHash(data)
+		}
 
-			mu.Lock()
-			current.Files[f.RelPath] = FileEntry{
-				ContentHash: hash,
-			}
-			mu.Unlock()
-		}(f)
+		work <- f
+	}
+	if work != nil {
+		close(work)
 	}
 	wg.Wait()
 
@@ -683,7 +693,8 @@ func UnsealStatus(cfg *config.Config, opts ...UnsealOption) (*DiffResult, error)
 	if numWorkers < 1 {
 		numWorkers = 1
 	}
-	sem := make(chan struct{}, numWorkers)
+
+	var work chan ScanResult
 
 	for _, f := range files {
 		// Fast path: see Status above for the rationale and the
@@ -697,22 +708,31 @@ func UnsealStatus(cfg *config.Config, opts ...UnsealOption) (*DiffResult, error)
 			}
 		}
 
-		wg.Add(1)
-		go func(f ScanResult) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+		if work == nil {
+			work = make(chan ScanResult, numWorkers)
+			for i := 0; i < numWorkers; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for f := range work {
+						data, err := os.ReadFile(f.AbsPath)
+						if err != nil {
+							continue
+						}
+						hash := ContentHash(data)
 
-			data, err := os.ReadFile(f.AbsPath)
-			if err != nil {
-				return
+						mu.Lock()
+						onDisk[f.RelPath] = hash
+						mu.Unlock()
+					}
+				}()
 			}
-			hash := ContentHash(data)
+		}
 
-			mu.Lock()
-			onDisk[f.RelPath] = hash
-			mu.Unlock()
-		}(f)
+		work <- f
+	}
+	if work != nil {
+		close(work)
 	}
 	wg.Wait()
 
