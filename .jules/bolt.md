@@ -1,0 +1,4 @@
+## 2024-05-18 - Two-pass matchesAnyCompiled is a regression
+
+**Learning:** Splitting `matchesAnyCompiled` into two passes (one for exact matches, one for wildcards) to "fast path" exact matches actually causes a measurable performance regression (~25% slower). Because the function returns a boolean `true` on any match, the result is already order-independent. The cost of a second iteration over the pattern slice outweighs the theoretical benefit of skipping a wildcard check, especially when the slice size is small or the typical match happens early. Also, hand-rolled prefix checking in `fastRel` can be slower than the standard library `strings.HasPrefix` which is highly optimized.
+**Action:** Always benchmark optimizations against the `main` branch baseline using `-count=5` to ensure the "optimization" isn't actually a regression. Do not try to outsmart simple single-pass iterations or standard library string functions without concrete baseline proof.
