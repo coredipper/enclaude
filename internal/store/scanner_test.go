@@ -438,6 +438,10 @@ func BenchmarkScannerMatchesAny_ExactPattern(b *testing.B) {
 	_ = sink
 }
 
+// TestFastRel_DoubledSeparator guards fastRel against doubled separators at
+// the base boundary. Reordering the separator checks to drop strings.HasPrefix
+// changed the result for these inputs, so each case is pinned to what
+// filepath.Rel returns for the same pair.
 func TestFastRel_DoubledSeparator(t *testing.T) {
 	tests := []struct {
 		base string
@@ -445,7 +449,9 @@ func TestFastRel_DoubledSeparator(t *testing.T) {
 		want string
 	}{
 		{"/a/", "/a//b", "b"},
-		{"/", "//", ""},
+		{"/", "//", "."},
+		{"/a/", "/a/b", "b"},
+		{"/a", "/a/b", "b"},
 	}
 
 	for _, tt := range tests {
