@@ -1510,7 +1510,14 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 
 	applied := make([]string, 0, len(hashes))
 	for _, hash := range hashes {
-		data, err := os.ReadFile(stagedObjectPath(newRoot, hash))
+		path, err := stagedObjectPath(newRoot, hash)
+		if err != nil {
+			return len(applied), recoverRotationApplyFailure(
+				store, oldRoot, newRoot, hashes, applied,
+				fmt.Errorf("invalid hash for staged object: %w", err),
+			)
+		}
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return len(applied), recoverRotationApplyFailure(
 				store, oldRoot, newRoot, hashes, applied,
@@ -1607,12 +1614,18 @@ func uniqueManifestHashes(manifest *Manifest) []string {
 	return hashes
 }
 
-func stagedObjectPath(root, hash string) string {
-	return filepath.Join(root, hash[:2], hash[2:]+".age")
+func stagedObjectPath(root, hash string) (string, error) {
+	if !isValidHash(hash) {
+		return "", fmt.Errorf("invalid content hash: %q", hash)
+	}
+	return filepath.Join(root, hash[:2], hash[2:]+".age"), nil
 }
 
 func writeStagedObject(root, hash string, data []byte) error {
-	path := stagedObjectPath(root, hash)
+	path, err := stagedObjectPath(root, hash)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
@@ -1622,7 +1635,12 @@ func writeStagedObject(root, hash string, data []byte) error {
 func rollbackRotatedObjects(store *ObjectStore, oldRoot string, hashes []string) error {
 	var errs []error
 	for _, hash := range hashes {
-		data, err := os.ReadFile(stagedObjectPath(oldRoot, hash))
+		path, err := stagedObjectPath(oldRoot, hash)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("invalid hash for backup %s: %w", shortHash(hash), err))
+			continue
+		}
+		data, err := os.ReadFile(path)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("read backup %s: %w", shortHash(hash), err))
 			continue
@@ -1637,7 +1655,12 @@ func rollbackRotatedObjects(store *ObjectStore, oldRoot string, hashes []string)
 func rollForwardRotatedObjects(store *ObjectStore, newRoot string, hashes []string) error {
 	var errs []error
 	for _, hash := range hashes {
-		data, err := os.ReadFile(stagedObjectPath(newRoot, hash))
+		path, err := stagedObjectPath(newRoot, hash)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("invalid hash for rotated %s: %w", shortHash(hash), err))
+			continue
+		}
+		data, err := os.ReadFile(path)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("read rotated %s: %w", shortHash(hash), err))
 			continue

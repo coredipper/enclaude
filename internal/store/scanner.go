@@ -97,17 +97,25 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 // fastRel is a highly optimized version of filepath.Rel for the common case
 // where path is a simple descendant of base. WalkDir guarantees paths are
 // joined cleanly, so we can often avoid filepath.Clean and allocation overhead.
+// Doubled separators at the base boundary collapse the way filepath.Rel
+// collapses them (base="/a/", path="/a//b" yields "b"), which the previous
+// strings.HasPrefix form did not do.
 func fastRel(base, path string) (string, error) {
+	baseLen := len(base)
+	if len(path) > baseLen && path[:baseLen] == base {
+		if os.IsPathSeparator(path[baseLen]) {
+			// path is base plus separators only (base="/", path="//"):
+			// there is no remainder to return, so defer to filepath.Rel,
+			// which reports "." rather than an empty path.
+			if rel := path[baseLen+1:]; rel != "" {
+				return rel, nil
+			}
+		} else if baseLen > 0 && os.IsPathSeparator(base[baseLen-1]) {
+			return path[baseLen:], nil
+		}
+	}
 	if base == path {
 		return ".", nil
-	}
-	if strings.HasPrefix(path, base) {
-		if len(base) > 0 && os.IsPathSeparator(base[len(base)-1]) {
-			return path[len(base):], nil
-		}
-		if len(path) > len(base) && os.IsPathSeparator(path[len(base)]) {
-			return path[len(base)+1:], nil
-		}
 	}
 	return filepath.Rel(base, path)
 }
@@ -252,6 +260,22 @@ func matchSegmentsPatRem(path string, morePath bool, pattern string, morePat boo
 		} else {
 			currentSegment = path[:idxPath]
 			path = path[idxPath+1:] // Move past '/'; at least the tail remains
+		}
+
+		// Fast path to avoid filepath.Match overhead for patterns without wildcards in this segment
+		hasWildcard := false
+		for i := 0; i < len(pat); i++ {
+			c := pat[i]
+			if c == '*' || c == '?' || c == '[' || c == '\\' {
+				hasWildcard = true
+				break
+			}
+		}
+		if !hasWildcard {
+			if pat != currentSegment {
+				return false
+			}
+			continue
 		}
 
 		// Match current segment with filepath.Match (handles * and ? within a segment)

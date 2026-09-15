@@ -26,4 +26,7 @@
 ## 2026-07-06 - Unhandled rand.Read Error in Benchmarks Vulnerability
 **Vulnerability:** Unchecked errors from `math/rand.Read` or `crypto/rand.Read` in benchmark tests.
 **Learning:** Unhandled random generation errors in benchmarks can lead to measuring the performance of predictable (zeroed) data generation or processing instead of actual random data processing, potentially skewing benchmark results or hiding actual errors.
-**Prevention:** Even in tests and benchmarks, always check the error returned by `rand.Read` and use `b.Fatalf` or `t.Fatalf` to abort the execution if it fails.
+## 2026-07-07 - Prevent Path Traversal in Auxiliary Object Paths (Defense in Depth)
+**Vulnerability:** The `stagedObjectPath` function used in object rotation didn't validate if `hash` was a valid SHA-256 hex string before constructing paths, leading to a potential path traversal vulnerability.
+**Learning:** This is a defense-in-depth / LOW severity gap because the primary `ObjectStore.Read` path already blocks invalid hashes before `stagedObjectPath` is reached in rotation. However, it closes a gap that would open if a new caller ever reached staging without going through `store.Read` first.
+**Prevention:** In auxiliary functions like `stagedObjectPath`, always apply the same validation `isValidHash` as used in the primary `ObjectStore` read/write paths, and return an error if validation fails.
