@@ -128,12 +128,21 @@ func fastRel(base, path string) (string, error) {
 type compiledPattern struct {
 	raw           string
 	hasDoubleStar bool
-	hasWildcard   bool
 }
 
-func compilePatterns(patterns []string) []compiledPattern {
-	res := make([]compiledPattern, len(patterns))
-	for i, p := range patterns {
+// PatternSet holds pre-processed glob patterns separated into exact string matches
+// and wildcard patterns for efficient matching.
+type PatternSet struct {
+	exact    map[string]struct{}
+	wildcard []compiledPattern
+}
+
+func compilePatterns(patterns []string) PatternSet {
+	res := PatternSet{
+		exact:    make(map[string]struct{}),
+		wildcard: make([]compiledPattern, 0, len(patterns)),
+	}
+	for _, p := range patterns {
 		hasWildcard := false
 		for j := 0; j < len(p); j++ {
 			c := p[j]
@@ -142,24 +151,26 @@ func compilePatterns(patterns []string) []compiledPattern {
 				break
 			}
 		}
-		res[i] = compiledPattern{
-			raw:           p,
-			hasDoubleStar: strings.Contains(p, "**"),
-			hasWildcard:   hasWildcard,
+		if !hasWildcard {
+			res.exact[p] = struct{}{}
+		} else {
+			res.wildcard = append(res.wildcard, compiledPattern{
+				raw:           p,
+				hasDoubleStar: strings.Contains(p, "**"),
+			})
 		}
+
 	}
 	return res
 }
 
 // matchesAnyCompiled checks if a relative path matches any of the compiled glob patterns.
-func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
-	for _, p := range patterns {
-		if !p.hasWildcard {
-			if p.raw == relPath {
-				return true
-			}
-			continue
-		}
+func matchesAnyCompiled(relPath string, patterns PatternSet) bool {
+	if _, ok := patterns.exact[relPath]; ok {
+		return true
+	}
+
+	for _, p := range patterns.wildcard {
 
 		if !p.hasDoubleStar {
 			matched, _ := filepath.Match(p.raw, relPath)
