@@ -115,8 +115,9 @@ func MergeSessionsIndex(ours, theirs []byte) ([]byte, error) {
 	}
 
 	// Deduplicate by sessionId
-	seen := make(map[string]json.RawMessage)
-	var order []string
+	estimatedEntries := len(oursEntries) + len(theirsEntries)
+	seen := make(map[string]json.RawMessage, estimatedEntries)
+	order := make([]string, 0, estimatedEntries)
 
 	for _, entries := range [][]json.RawMessage{oursEntries, theirsEntries} {
 		for _, entry := range entries {
@@ -140,21 +141,18 @@ func MergeSessionsIndex(ours, theirs []byte) ([]byte, error) {
 	// Build output — merge top-level keys from both sides.
 	// Start with theirs, then overlay ours so ours takes precedence
 	// for shared keys. This preserves metadata from theirs that ours lacks.
-	outObj := make(map[string]json.RawMessage)
-	for k, v := range theirsObj {
-		outObj[k] = v
-	}
+	// We can reuse theirsObj to save map allocations
 	for k, v := range oursObj {
-		outObj[k] = v
+		theirsObj[k] = v
 	}
 
 	entriesJSON, err := json.Marshal(merged)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling merged entries: %w", err)
 	}
-	outObj["entries"] = entriesJSON
+	theirsObj["entries"] = entriesJSON
 
-	return json.MarshalIndent(outObj, "", "  ")
+	return json.MarshalIndent(theirsObj, "", "  ")
 }
 
 type jsonlEntry struct {
