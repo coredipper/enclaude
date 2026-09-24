@@ -153,7 +153,12 @@ func compilePatterns(patterns []string) []compiledPattern {
 
 // matchesAnyCompiled checks if a relative path matches any of the compiled glob patterns.
 func matchesAnyCompiled(relPath string, patterns []compiledPattern) bool {
-	for _, p := range patterns {
+	// Optimization: iterate by index and use a pointer to avoid copying the
+	// compiledPattern struct (which contains a string and booleans) on every loop
+	// iteration, as this function is called in the hot path for every directory
+	// and file scanned.
+	for i := range patterns {
+		p := &patterns[i]
 		if !p.hasWildcard {
 			if p.raw == relPath {
 				return true
