@@ -1,8 +1,8 @@
 package store
 
 import (
+	"crypto/rand"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,19 +16,25 @@ func BenchmarkStatus(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	claudeDir := filepath.Join(tmpDir, "claude")
 	sealDir := filepath.Join(tmpDir, "seal")
-	os.MkdirAll(claudeDir, 0755)
-	os.MkdirAll(sealDir, 0755)
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		b.Fatalf("os.MkdirAll: %v", err)
+	}
+	if err := os.MkdirAll(sealDir, 0755); err != nil {
+		b.Fatalf("os.MkdirAll: %v", err)
+	}
 
 	for i := 0; i < 1000; i++ {
 		content := make([]byte, 100*1024)
 		if _, err := rand.Read(content); err != nil {
 			b.Fatalf("failed to generate random data: %v", err)
 		}
-		os.WriteFile(filepath.Join(claudeDir, fmt.Sprintf("file-%d.txt", i)), content, 0644)
+		if err := os.WriteFile(filepath.Join(claudeDir, fmt.Sprintf("file-%d.txt", i)), content, 0644); err != nil {
+			b.Fatalf("os.WriteFile: %v", err)
+		}
 	}
 
 	manifest := NewManifest("test-device")
@@ -42,7 +48,9 @@ func BenchmarkStatus(b *testing.B) {
 			ModTimeNs:     info.ModTime().UnixNano(),
 		}
 	}
-	manifest.Save(sealDir)
+	if err := manifest.Save(sealDir); err != nil {
+		b.Fatalf("manifest.Save: %v", err)
+	}
 
 	cfg := &config.Config{
 		Seal:    config.SealSection{ClaudeDir: claudeDir, SealDir: sealDir, DeviceID: "test-device"},
@@ -62,19 +70,25 @@ func BenchmarkUnsealStatus(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	claudeDir := filepath.Join(tmpDir, "claude")
 	sealDir := filepath.Join(tmpDir, "seal")
-	os.MkdirAll(claudeDir, 0755)
-	os.MkdirAll(sealDir, 0755)
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		b.Fatalf("os.MkdirAll: %v", err)
+	}
+	if err := os.MkdirAll(sealDir, 0755); err != nil {
+		b.Fatalf("os.MkdirAll: %v", err)
+	}
 
 	for i := 0; i < 1000; i++ {
 		content := make([]byte, 100*1024)
 		if _, err := rand.Read(content); err != nil {
 			b.Fatalf("failed to generate random data: %v", err)
 		}
-		os.WriteFile(filepath.Join(claudeDir, fmt.Sprintf("file-%d.txt", i)), content, 0644)
+		if err := os.WriteFile(filepath.Join(claudeDir, fmt.Sprintf("file-%d.txt", i)), content, 0644); err != nil {
+			b.Fatalf("os.WriteFile: %v", err)
+		}
 	}
 
 	manifest := NewManifest("test-device")
@@ -88,7 +102,9 @@ func BenchmarkUnsealStatus(b *testing.B) {
 			ModTimeNs:     info.ModTime().UnixNano(),
 		}
 	}
-	manifest.Save(sealDir)
+	if err := manifest.Save(sealDir); err != nil {
+		b.Fatalf("manifest.Save: %v", err)
+	}
 
 	cfg := &config.Config{
 		Seal:    config.SealSection{ClaudeDir: claudeDir, SealDir: sealDir, DeviceID: "test-device"},

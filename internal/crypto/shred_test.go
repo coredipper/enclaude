@@ -74,7 +74,7 @@ func TestShredFile_Undeletable(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		// Restore permissions so TempDir cleanup doesn't fail
-		os.Chmod(dir, 0755)
+		_ = os.Chmod(dir, 0755)
 	})
 
 	err := ShredFile(path)

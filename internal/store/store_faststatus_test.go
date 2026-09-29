@@ -371,7 +371,7 @@ func TestStatus_ScanFilesError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		os.Chmod(subDir, 0755) // Ensure cleanup works
+		_ = os.Chmod(subDir, 0755) // Ensure cleanup works
 	})
 
 	cfg := &config.Config{

@@ -565,12 +565,20 @@ func TestPull(t *testing.T) {
 	}
 	upstream := New(upstreamDir)
 	initTestRepo(t, upstream)
-	upstream.run("config", "user.name", "Test User")
-	upstream.run("config", "user.email", "test@example.com")
-	upstream.run("config", "receive.denyCurrentBranch", "ignore")
+	if _, err := upstream.run("config", "user.name", "Test User"); err != nil {
+		t.Fatalf("upstream.run: %v", err)
+	}
+	if _, err := upstream.run("config", "user.email", "test@example.com"); err != nil {
+		t.Fatalf("upstream.run: %v", err)
+	}
+	if _, err := upstream.run("config", "receive.denyCurrentBranch", "ignore"); err != nil {
+		t.Fatalf("upstream.run: %v", err)
+	}
 
 	file1 := filepath.Join(upstreamDir, "file1.txt")
-	os.WriteFile(file1, []byte("content1"), 0644)
+	if err := os.WriteFile(file1, []byte("content1"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 	if err := upstream.AddAll(); err != nil {
 		t.Fatal(err)
 	}
@@ -585,8 +593,12 @@ func TestPull(t *testing.T) {
 	}
 	downstream := New(downstreamDir)
 	initTestRepo(t, downstream)
-	downstream.run("config", "user.name", "Test User 2")
-	downstream.run("config", "user.email", "test2@example.com")
+	if _, err := downstream.run("config", "user.name", "Test User 2"); err != nil {
+		t.Fatalf("downstream.run: %v", err)
+	}
+	if _, err := downstream.run("config", "user.email", "test2@example.com"); err != nil {
+		t.Fatalf("downstream.run: %v", err)
+	}
 	// Force fast-forward-only pulls so the fetched-commit count is deterministic
 	// regardless of the caller's global pull.ff / merge configuration.
 	if _, err := downstream.run("config", "pull.ff", "only"); err != nil {
@@ -624,7 +636,9 @@ func TestPull(t *testing.T) {
 
 	// 2. New commit in upstream
 	file2 := filepath.Join(upstreamDir, "file2.txt")
-	os.WriteFile(file2, []byte("content2"), 0644)
+	if err := os.WriteFile(file2, []byte("content2"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 	if err := upstream.AddAll(); err != nil {
 		t.Fatal(err)
 	}

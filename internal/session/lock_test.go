@@ -55,7 +55,9 @@ func TestSealLock_Basic(t *testing.T) {
 	if !locked2 {
 		t.Fatal("expected to acquire lock2")
 	}
-	lock2.Release()
+	if err := lock2.Release(); err != nil {
+		t.Fatalf("lock2.Release: %v", err)
+	}
 }
 
 // TestSealLock_ReleaseWithoutAcquire verifies Release on a never-acquired

@@ -68,7 +68,9 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 
 	var ancestor, ours, theirs sealstore.Manifest
 	if len(ancestorData) > 0 {
-		json.Unmarshal(ancestorData, &ancestor)
+		if err := json.Unmarshal(ancestorData, &ancestor); err != nil {
+			return fmt.Errorf("parsing ancestor manifest: %w", err)
+		}
 	}
 	if err := json.Unmarshal(oursData, &ours); err != nil {
 		return fmt.Errorf("parsing ours manifest: %w", err)
@@ -318,5 +320,5 @@ func emitMergeEvent(strategy, path string, fields map[string]int) {
 		}
 	}
 	b.WriteByte('\n')
-	os.Stderr.Write(b.Bytes())
+	_, _ = os.Stderr.Write(b.Bytes())
 }

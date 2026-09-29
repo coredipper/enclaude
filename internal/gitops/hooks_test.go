@@ -50,7 +50,9 @@ func TestInstallHooksPreservesExisting(t *testing.T) {
 	}
 
 	data, _ := json.MarshalIndent(existing, "", "  ")
-	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	if err := InstallHooks(dir); err != nil {
 		t.Fatalf("InstallHooks() error: %v", err)
@@ -80,10 +82,16 @@ func TestInstallHooksIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	settings := map[string]any{"hooks": map[string]any{}}
 	data, _ := json.MarshalIndent(settings, "", "  ")
-	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
-	InstallHooks(dir)
-	InstallHooks(dir)
+	if err := InstallHooks(dir); err != nil {
+		t.Fatalf("InstallHooks: %v", err)
+	}
+	if err := InstallHooks(dir); err != nil {
+		t.Fatalf("InstallHooks: %v", err)
+	}
 
 	result, _ := os.ReadFile(filepath.Join(dir, "settings.json"))
 	count := strings.Count(string(result), hookMarker)
@@ -125,7 +133,9 @@ func TestInstallHooksMigratesLegacy(t *testing.T) {
 	}
 
 	data, _ := json.MarshalIndent(existing, "", "  ")
-	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	if err := InstallHooks(dir); err != nil {
 		t.Fatalf("InstallHooks() error: %v", err)
@@ -151,9 +161,13 @@ func TestRemoveHooksPreservesOthers(t *testing.T) {
 	dir := t.TempDir()
 	settings := map[string]any{"hooks": map[string]any{}}
 	data, _ := json.MarshalIndent(settings, "", "  ")
-	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
-	InstallHooks(dir)
+	if err := InstallHooks(dir); err != nil {
+		t.Fatalf("InstallHooks: %v", err)
+	}
 
 	if !HooksInstalled(dir) {
 		t.Fatal("hooks should be installed")
@@ -198,7 +212,9 @@ func TestRemoveHandlesBothFormats(t *testing.T) {
 	}
 
 	data, _ := json.MarshalIndent(existing, "", "  ")
-	os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644)
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), data, 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	if err := RemoveHooks(dir); err != nil {
 		t.Fatalf("RemoveHooks() error: %v", err)
@@ -345,14 +361,18 @@ func TestMigrateLegacyHooks(t *testing.T) {
 
 	// Verify migrated hook has marker
 	var result []hookEntry
-	json.Unmarshal(hooks["SessionStart"], &result)
+	if err := json.Unmarshal(hooks["SessionStart"], &result); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
 	if !hasMarker(result[0].Hooks[0].Command) {
 		t.Errorf("migrated hook missing marker: %s", result[0].Hooks[0].Command)
 	}
 
 	// Verify other hooks untouched
 	var others []hookEntry
-	json.Unmarshal(hooks["PreToolUse"], &others)
+	if err := json.Unmarshal(hooks["PreToolUse"], &others); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
 	if others[0].Hooks[0].Command != "/path/to/peon.sh" {
 		t.Errorf("non-enclaude hook was modified: %s", others[0].Hooks[0].Command)
 	}

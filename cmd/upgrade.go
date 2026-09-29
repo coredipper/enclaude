@@ -60,7 +60,7 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 	for _, testPath := range probes {
 		resolvedStrategy, winningPattern := store.ResolveMergeStrategyWithPattern(testPath, cfg.Merge)
 		if resolvedStrategy == "jsonl_dedup" {
-			fmt.Fprintf(cmd.ErrOrStderr(),
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 				"\n%s %s resolves to jsonl_dedup (via rule %q).\n"+
 					"  Update it to 'sessions_index' in seal.toml.\n", ui.Red("Warning:"), testPath, winningPattern)
 			return fmt.Errorf("manual fix required: update rule %q to 'sessions_index' in seal.toml", winningPattern)
