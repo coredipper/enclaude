@@ -362,6 +362,19 @@ func TestMergeSessionsIndexMissingEntriesKey(t *testing.T) {
 	}
 }
 
+// TestMergeSessionsIndexNullTheirs guards against a nil-map panic when the
+// theirs side is the JSON literal null, since the merge reuses theirs' parsed
+// map as the output object.
+func TestMergeSessionsIndexNullTheirs(t *testing.T) {
+	merged, err := MergeSessionsIndex([]byte(`{"entries": [{"sessionId": "s1"}]}`), []byte(`null`))
+	if err != nil {
+		t.Fatalf("MergeSessionsIndex() error: %v", err)
+	}
+	if !strings.Contains(string(merged), "s1") {
+		t.Errorf("expected entry from ours in merged output, got %s", merged)
+	}
+}
+
 func TestMergeSessionsIndexNoSessionIdFallsBackToFullJSON(t *testing.T) {
 	ours := []byte(`{"entries": [{"name": "no-id-entry-a"}]}`)
 	theirs := []byte(`{"entries": [{"name": "no-id-entry-b"}]}`)
