@@ -38,9 +38,9 @@ under `internal/<package>`.
 | Verbose | `make test-verbose`                           |
 | Lint    | `make lint` (golangci-lint)                   |
 
-CI (`.github/workflows/ci.yml`) runs `go test ./... -count=1` plus a
-cross-compile matrix (linux/darwin × amd64/arm64) on PRs and pushes to
-`main`. Keep these green before merging.
+CI (`.github/workflows/ci.yml`) runs `go test ./... -count=1`,
+golangci-lint, and a cross-compile matrix (linux/darwin × amd64/arm64)
+on PRs and pushes to `main`. Keep these green before merging.
 
 ## Version injection
 
