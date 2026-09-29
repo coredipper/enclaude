@@ -84,7 +84,11 @@ func handleSessionStart() error {
 		logHook("could not acquire lock, skipping session-start hook")
 		return nil
 	}
-	defer lock.Release()
+	defer func() {
+		if err := lock.Release(); err != nil {
+			logHook("releasing seal lock: %v", err)
+		}
+	}()
 
 	// Pull if auto-pull enabled and remote configured
 	if cfg.Sync.AutoPull {
@@ -133,7 +137,11 @@ func handleSessionEnd() error {
 		logHook("could not acquire lock, skipping session-end hook")
 		return nil
 	}
-	defer lock.Release()
+	defer func() {
+		if err := lock.Release(); err != nil {
+			logHook("releasing seal lock: %v", err)
+		}
+	}()
 
 	// Seal
 	recipient, _, err := crypto.LoadPublicKey()

@@ -408,7 +408,9 @@ func unsealFile(store *ObjectStore, identity age.Identity, entry FileEntry, absP
 	}
 	if entry.ModTimeNs != 0 {
 		mtime := time.Unix(0, entry.ModTimeNs)
-		os.Chtimes(absPath, mtime, mtime)
+		// Best effort: a stale mtime only makes the next status rehash
+		// this file instead of taking the size+mtime fast path.
+		_ = os.Chtimes(absPath, mtime, mtime)
 	}
 
 	return len(plaintext), nil
@@ -424,7 +426,7 @@ func noManifestErr(sealDir string) error {
 			"it was likely excluded by a gitignore on the device that pushed it.\n"+
 			"On that device run:\n"+
 			"  git -C %s add -f manifest.json && git -C %s commit -m 'track manifest' && enclaude push\n"+
-			"then run `enclaude pull` here.", sealDir, len(objs), sealDir, sealDir)
+			"then run `enclaude pull` here", sealDir, len(objs), sealDir, sealDir)
 	}
 	return fmt.Errorf("no manifest found — is the seal store initialized?")
 }
@@ -551,7 +553,9 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 					}
 					dir := filepath.Dir(f.AbsPath)
 					if dir != cfg.Seal.ClaudeDir {
-						os.Remove(dir)
+						// Removes the parent only once it is empty; failure
+						// for a non-empty directory is expected.
+						_ = os.Remove(dir)
 					}
 				} else {
 					stats.Errors++
@@ -793,7 +797,7 @@ func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope,
 	if err != nil {
 		return stats, fmt.Errorf("opening Claude root: %w", err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	paths := make([]string, 0, len(manifest.Files))
 	for path := range manifest.Files {
@@ -1107,7 +1111,7 @@ func RandomHex(n int) (string, error) {
 
 func shredOpenFile(f *os.File, relPath string, size int64) error {
 	if _, err := f.Seek(0, 0); err != nil {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("seeking %s: %w", relPath, err)
 	}
 	buf := make([]byte, min(size, 64*1024))
@@ -1447,7 +1451,15 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 			if referenced[hash] {
 				continue // still needed by another manifest entry
 			}
-			store.Delete(hash)
+			// The manifest is already saved, so a failed delete only leaves
+			// an orphan behind for the next repair; warn instead of failing.
+			// allOrphans can list a hash twice, hence the IsNotExist skip.
+			if err := store.Delete(hash); err != nil {
+				if !os.IsNotExist(err) {
+					fmt.Fprintf(os.Stderr, "  [warning] deleting orphan %s: %v\n", shortHash(hash), err)
+				}
+				continue
+			}
 			if verbose {
 				fmt.Printf("  [deleted] orphan %s\n", shortHash(hash))
 			}
@@ -1476,7 +1488,7 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 	if err != nil {
 		return 0, rotationStoreUnchangedError(fmt.Errorf("creating rotation staging dir: %w", err))
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 	newRoot := filepath.Join(tmpDir, "new")
 	oldRoot := filepath.Join(tmpDir, "old")
 

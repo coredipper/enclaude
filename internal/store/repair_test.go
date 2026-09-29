@@ -15,7 +15,9 @@ import (
 func TestListAllObjects(t *testing.T) {
 	sealDir := t.TempDir()
 	store := NewObjectStore(sealDir)
-	store.Init()
+	if err := store.Init(); err != nil {
+		t.Fatalf("store.Init: %v", err)
+	}
 
 	// Write some objects
 	hashes := []string{
@@ -23,7 +25,9 @@ func TestListAllObjects(t *testing.T) {
 		"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
 	}
 	for _, h := range hashes {
-		store.Write(h, []byte("test"))
+		if err := store.Write(h, []byte("test")); err != nil {
+			t.Fatalf("store.Write: %v", err)
+		}
 	}
 
 	listed, err := store.ListAll()
@@ -52,7 +56,9 @@ func TestVerifyHealthySeal(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	result, err := Verify(cfg, identity, false)
 	if err != nil {
@@ -77,14 +83,18 @@ func TestVerifyDetectsMissingObject(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Delete the object for history.jsonl specifically (has unique content,
 	// unlike abc123.jsonl and agent-abc.jsonl which share the same hash).
 	manifest, _ := LoadManifest(sealDir)
 	store := NewObjectStore(sealDir)
 	entry := manifest.Files["history.jsonl"]
-	os.Remove(store.ObjectPath(entry.ContentHash))
+	if err := os.Remove(store.ObjectPath(entry.ContentHash)); err != nil {
+		t.Fatalf("os.Remove: %v", err)
+	}
 
 	result, err := Verify(cfg, identity, true)
 	if err != nil {
@@ -103,12 +113,16 @@ func TestVerifyDetectsOrphan(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Add a fake orphan object
 	store := NewObjectStore(sealDir)
 	fakeHash := "deadbeef12345678deadbeef12345678deadbeef12345678deadbeef12345678"
-	store.Write(fakeHash, []byte("orphan data"))
+	if err := store.Write(fakeHash, []byte("orphan data")); err != nil {
+		t.Fatalf("store.Write: %v", err)
+	}
 
 	result, err := Verify(cfg, identity, true)
 	if err != nil {
@@ -127,13 +141,17 @@ func TestRepairFixesMissing(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Delete the object for history.jsonl (has unique content).
 	manifest, _ := LoadManifest(sealDir)
 	store := NewObjectStore(sealDir)
 	deletedPath := "history.jsonl"
-	os.Remove(store.ObjectPath(manifest.Files[deletedPath].ContentHash))
+	if err := os.Remove(store.ObjectPath(manifest.Files[deletedPath].ContentHash)); err != nil {
+		t.Fatalf("os.Remove: %v", err)
+	}
 
 	// Repair should re-seal from plaintext
 	result, err := Repair(cfg, identity, false, false)
@@ -198,7 +216,9 @@ func TestRepairUpdatesManifestWhenPlaintextChanged(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Delete the object for history.jsonl (has unique content, unlike
 	// abc123.jsonl and agent-abc.jsonl which share the same hash).
@@ -206,11 +226,15 @@ func TestRepairUpdatesManifestWhenPlaintextChanged(t *testing.T) {
 	store := NewObjectStore(sealDir)
 	deletedPath := "history.jsonl"
 	oldHash := manifest.Files[deletedPath].ContentHash
-	os.Remove(store.ObjectPath(oldHash))
+	if err := os.Remove(store.ObjectPath(oldHash)); err != nil {
+		t.Fatalf("os.Remove: %v", err)
+	}
 
 	// Modify the plaintext so its hash will differ from manifest
 	newContent := []byte("completely new content after modification")
-	os.WriteFile(filepath.Join(claudeDir, deletedPath), newContent, 0644)
+	if err := os.WriteFile(filepath.Join(claudeDir, deletedPath), newContent, 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 	expectedHash := ContentHash(newContent)
 
 	// Repair should re-seal from modified plaintext and update manifest
@@ -246,7 +270,9 @@ func TestRotateReEncrypts(t *testing.T) {
 	oldIdentity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, oldIdentity.Recipient(), false, nil)
+	if _, err := Seal(cfg, oldIdentity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Generate new key and rotate
 	newIdentity, _ := crypto.GenerateKey()
@@ -519,7 +545,9 @@ func TestVerifyInvalidManifest(t *testing.T) {
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
 	// Write an invalid manifest.json
-	os.WriteFile(filepath.Join(sealDir, "manifest.json"), []byte("invalid json"), 0644)
+	if err := os.WriteFile(filepath.Join(sealDir, "manifest.json"), []byte("invalid json"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	_, err := Verify(cfg, identity, false)
 	if err == nil {
@@ -536,7 +564,9 @@ func TestVerifyReadError(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	manifest, _ := LoadManifest(sealDir)
 	store := NewObjectStore(sealDir)
@@ -552,8 +582,12 @@ func TestVerifyReadError(t *testing.T) {
 
 	// Replace object with a directory to cause read error
 	objPath := store.ObjectPath(hash)
-	os.Remove(objPath)
-	os.MkdirAll(objPath, 0755)
+	if err := os.Remove(objPath); err != nil {
+		t.Fatalf("os.Remove: %v", err)
+	}
+	if err := os.MkdirAll(objPath, 0755); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 
 	result, err := Verify(cfg, identity, true)
 	if err != nil {
@@ -581,7 +615,9 @@ func TestVerifyDecryptError(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	manifest, _ := LoadManifest(sealDir)
 	store := NewObjectStore(sealDir)
@@ -596,7 +632,9 @@ func TestVerifyDecryptError(t *testing.T) {
 
 	// Write random data to object to cause decrypt error
 	objPath := store.ObjectPath(hash)
-	os.WriteFile(objPath, []byte("definitely not an age encrypted file"), 0644)
+	if err := os.WriteFile(objPath, []byte("definitely not an age encrypted file"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	result, err := Verify(cfg, identity, true)
 	if err != nil {
@@ -624,7 +662,9 @@ func TestVerifyHashMismatch(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	manifest, _ := LoadManifest(sealDir)
 	store := NewObjectStore(sealDir)
@@ -641,7 +681,9 @@ func TestVerifyHashMismatch(t *testing.T) {
 	wrongContent := []byte("wrong plaintext")
 	wrongEncrypted, _ := crypto.Encrypt(wrongContent, identity.Recipient())
 	objPath := store.ObjectPath(hash)
-	os.WriteFile(objPath, wrongEncrypted, 0644)
+	if err := os.WriteFile(objPath, wrongEncrypted, 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	result, err := Verify(cfg, identity, true)
 	if err != nil {
@@ -669,12 +711,18 @@ func TestVerifyListObjectsError(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Replace objects directory with a file to cause ListAll() to fail
 	objectsDir := filepath.Join(sealDir, "objects")
-	os.RemoveAll(objectsDir)
-	os.WriteFile(objectsDir, []byte("not a directory"), 0644)
+	if err := os.RemoveAll(objectsDir); err != nil {
+		t.Fatalf("os.RemoveAll: %v", err)
+	}
+	if err := os.WriteFile(objectsDir, []byte("not a directory"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	_, err := Verify(cfg, identity, true)
 	if err == nil {
@@ -691,12 +739,16 @@ func TestRepairDeletesOrphans(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Add a fake orphan object
 	store := NewObjectStore(sealDir)
 	fakeHash := "deadbeef12345678deadbeef12345678deadbeef12345678deadbeef12345678"
-	store.Write(fakeHash, []byte("orphan data"))
+	if err := store.Write(fakeHash, []byte("orphan data")); err != nil {
+		t.Fatalf("store.Write: %v", err)
+	}
 
 	// Repair with deleteOrphans=true
 	result, err := Repair(cfg, identity, true, false)
@@ -722,14 +774,20 @@ func TestRepairSkipsMissingPlaintext(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Delete an object from the store AND from the plaintext dir
 	manifest, _ := LoadManifest(sealDir)
 	store := NewObjectStore(sealDir)
 	deletedPath := "history.jsonl"
-	os.Remove(store.ObjectPath(manifest.Files[deletedPath].ContentHash))
-	os.Remove(filepath.Join(claudeDir, deletedPath))
+	if err := os.Remove(store.ObjectPath(manifest.Files[deletedPath].ContentHash)); err != nil {
+		t.Fatalf("os.Remove: %v", err)
+	}
+	if err := os.Remove(filepath.Join(claudeDir, deletedPath)); err != nil {
+		t.Fatalf("os.Remove: %v", err)
+	}
 
 	// Repair should attempt to fix but fail to read plaintext, returning without error but Fixed=0
 	result, err := Repair(cfg, identity, false, false)
@@ -751,10 +809,14 @@ func TestRepairFailsWithCorruptManifest(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Corrupt manifest
-	os.WriteFile(filepath.Join(sealDir, "manifest.json"), []byte("{invalid json"), 0644)
+	if err := os.WriteFile(filepath.Join(sealDir, "manifest.json"), []byte("{invalid json"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	_, err := Repair(cfg, identity, false, false)
 	if err == nil {
@@ -771,7 +833,9 @@ func TestRepairFixesCorruptObject(t *testing.T) {
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Corrupt an object
 	manifest, _ := LoadManifest(sealDir)
@@ -780,7 +844,9 @@ func TestRepairFixesCorruptObject(t *testing.T) {
 	hash := manifest.Files[corruptedPath].ContentHash
 
 	// Write wrong content to the object file
-	store.Write(hash, []byte("corrupt data"))
+	if err := store.Write(hash, []byte("corrupt data")); err != nil {
+		t.Fatalf("store.Write: %v", err)
+	}
 
 	// Repair should fix it using the available plaintext
 	result, err := Repair(cfg, identity, false, false)

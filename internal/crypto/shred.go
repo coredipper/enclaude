@@ -26,21 +26,23 @@ func ShredFile(path string) error {
 	for written := int64(0); written < size; {
 		n := min(int64(len(buf)), size-written)
 		if _, err := rand.Read(buf[:n]); err != nil {
-			f.Close()
+			_ = f.Close()
 			return fmt.Errorf("generating overwrite bytes for %s: %w", path, err)
 		}
 		if _, err := f.Write(buf[:n]); err != nil {
-			f.Close()
+			_ = f.Close()
 			return fmt.Errorf("overwriting %s: %w", path, err)
 		}
 		written += n
 	}
 
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("syncing %s: %w", path, err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing %s: %w", path, err)
+	}
 
 	return os.Remove(path)
 }

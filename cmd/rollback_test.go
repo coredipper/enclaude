@@ -63,9 +63,13 @@ func TestRollbackE2E(t *testing.T) {
 
 	// Commit A (Initial)
 	// Create required directories first
-	os.MkdirAll(filepath.Join(claudeDir, "commands"), 0700)
+	if err := os.MkdirAll(filepath.Join(claudeDir, "commands"), 0700); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 	file1 := filepath.Join(claudeDir, "commands", "file1.txt")
-	os.WriteFile(file1, []byte("A"), 0644)
+	if err := os.WriteFile(file1, []byte("A"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	stats1, err := store.Seal(cfg, identity.Recipient(), false, nil)
 	if err != nil {
@@ -83,9 +87,13 @@ func TestRollbackE2E(t *testing.T) {
 	// We don't really need commitA ref for this test, but good to know it's there.
 
 	// Commit B (Modify file1, add file2)
-	os.WriteFile(file1, []byte("B"), 0644)
+	if err := os.WriteFile(file1, []byte("B"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 	file2 := filepath.Join(claudeDir, "commands", "file2.txt")
-	os.WriteFile(file2, []byte("B"), 0644)
+	if err := os.WriteFile(file2, []byte("B"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	stats2, err := store.Seal(cfg, identity.Recipient(), false, nil)
 	if err != nil {
@@ -105,9 +113,13 @@ func TestRollbackE2E(t *testing.T) {
 	refBHash := strings.Split(refB, " ")[0]
 
 	// Commit C (Modify file1, add file3)
-	os.WriteFile(file1, []byte("C"), 0644)
+	if err := os.WriteFile(file1, []byte("C"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 	file3 := filepath.Join(claudeDir, "commands", "file3.txt")
-	os.WriteFile(file3, []byte("C"), 0644)
+	if err := os.WriteFile(file3, []byte("C"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	stats3, err := store.Seal(cfg, identity.Recipient(), false, nil)
 	if err != nil {
@@ -175,8 +187,12 @@ func TestRollbackAbort(t *testing.T) {
 	t.Setenv("ENCLAUDE_KEY", identity.String())
 
 	cfg := config.DefaultConfig(claudeDir, sealDir)
-	os.MkdirAll(sealDir, 0700)
-	cfg.Save(sealDir)
+	if err := os.MkdirAll(sealDir, 0700); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
+	if err := cfg.Save(sealDir); err != nil {
+		t.Fatalf("cfg.Save: %v", err)
+	}
 
 	git := initTestGitRepo(t, sealDir)
 	runGit(t, sealDir, "config", "user.name", "Test User")
@@ -210,8 +226,8 @@ func TestRollbackAbort(t *testing.T) {
 	})
 
 	go func() {
-		w.Write([]byte("n\n"))
-		w.Close()
+		_, _ = w.Write([]byte("n\n"))
+		_ = w.Close()
 	}()
 
 	// Capture stdout to prevent noisy output
@@ -223,7 +239,7 @@ func TestRollbackAbort(t *testing.T) {
 	os.Stdout = devNull
 	t.Cleanup(func() {
 		os.Stdout = oldStdout
-		devNull.Close()
+		_ = devNull.Close()
 	})
 
 	rollbackForce = false // default

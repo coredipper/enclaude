@@ -53,7 +53,8 @@ func runRollback(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Use %s to skip this confirmation.\n\n", ui.Faint("--force"))
 		fmt.Print("Continue? [y/N] ")
 		var answer string
-		fmt.Scanln(&answer)
+		// A read error leaves answer empty, which aborts below.
+		_, _ = fmt.Scanln(&answer)
 		if answer != "y" && answer != "Y" {
 			fmt.Println("Aborted.")
 			return nil

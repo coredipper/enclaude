@@ -35,8 +35,12 @@ func setupTestDir(t *testing.T) string {
 
 	for path, content := range files {
 		fullPath := filepath.Join(dir, path)
-		os.MkdirAll(filepath.Dir(fullPath), 0755)
-		os.WriteFile(fullPath, []byte(content), 0644)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatalf("os.MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+			t.Fatalf("os.WriteFile: %v", err)
+		}
 	}
 
 	return dir
@@ -300,7 +304,7 @@ func mkUnreadableDir(t *testing.T, dir string) string {
 	if err := os.Mkdir(noPermsDir, 0000); err != nil {
 		t.Fatalf("failed to create directory: %v", err)
 	}
-	t.Cleanup(func() { os.Chmod(noPermsDir, 0755) })
+	t.Cleanup(func() { _ = os.Chmod(noPermsDir, 0755) })
 	if _, err := os.ReadDir(noPermsDir); err == nil {
 		t.Skip("directory readable despite mode 0000 (running as root or permissive filesystem); permission test not meaningful here")
 	}

@@ -17,8 +17,12 @@ func TestUnsealPathTraversal(t *testing.T) {
 	parent := t.TempDir()
 	claudeDir := filepath.Join(parent, "claude")
 	sealDir := filepath.Join(parent, "seal")
-	os.MkdirAll(claudeDir, 0700)
-	os.MkdirAll(sealDir, 0700)
+	if err := os.MkdirAll(claudeDir, 0700); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
+	if err := os.MkdirAll(sealDir, 0700); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 
 	identity, _ := crypto.GenerateKey()
 	cfg := config.DefaultConfig(claudeDir, sealDir)
@@ -32,7 +36,9 @@ func TestUnsealPathTraversal(t *testing.T) {
 		},
 	}
 	data, _ := json.Marshal(manifest)
-	os.WriteFile(filepath.Join(sealDir, "manifest.json"), data, 0644)
+	if err := os.WriteFile(filepath.Join(sealDir, "manifest.json"), data, 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	stats, err := Unseal(cfg, identity, false, nil)
 	if err != nil {
@@ -56,8 +62,12 @@ func TestRepairPathTraversal(t *testing.T) {
 	parent := t.TempDir()
 	claudeDir := filepath.Join(parent, "claude")
 	sealDir := filepath.Join(parent, "seal")
-	os.MkdirAll(claudeDir, 0700)
-	os.MkdirAll(sealDir, 0700)
+	if err := os.MkdirAll(claudeDir, 0700); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
+	if err := os.MkdirAll(sealDir, 0700); err != nil {
+		t.Fatalf("os.MkdirAll: %v", err)
+	}
 
 	// Secret outside ClaudeDir; the manifest key "../secret.txt" resolves here.
 	secret := []byte("top secret outside claude dir")
@@ -684,17 +694,25 @@ func TestSealIncrementalDetectsChanges(t *testing.T) {
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
 	// Initial seal
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Modify a file
 	historyPath := filepath.Join(claudeDir, "history.jsonl")
 	f, _ := os.OpenFile(historyPath, os.O_APPEND|os.O_WRONLY, 0644)
-	f.WriteString(`{"display":"new entry","timestamp":2}` + "\n")
-	f.Close()
+	if _, err := f.WriteString(`{"display":"new entry","timestamp":2}` + "\n"); err != nil {
+		t.Fatalf("f.WriteString: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("f.Close: %v", err)
+	}
 
 	// Add a new file
 	newSession := filepath.Join(claudeDir, "projects", "proj-a", "newsession.jsonl")
-	os.WriteFile(newSession, []byte(`{"type":"user","message":"hello"}`+"\n"), 0644)
+	if err := os.WriteFile(newSession, []byte(`{"type":"user","message":"hello"}`+"\n"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	// Second seal
 	stats, err := Seal(cfg, identity.Recipient(), false, nil)
@@ -803,7 +821,9 @@ func TestUnsealDeletesRemovedFiles(t *testing.T) {
 	cfg := config.DefaultConfig(claudeDir, sealDir)
 
 	// Seal all files
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Remove one file from the manifest (simulate another device deleting it)
 	manifest, _ := LoadManifest(sealDir)
@@ -813,7 +833,9 @@ func TestUnsealDeletesRemovedFiles(t *testing.T) {
 		delete(manifest.Files, path)
 		break
 	}
-	manifest.Save(sealDir)
+	if err := manifest.Save(sealDir); err != nil {
+		t.Fatalf("manifest.Save: %v", err)
+	}
 
 	// Unseal should delete the stale file
 	stats, err := Unseal(cfg, identity, false, nil)
@@ -886,8 +908,12 @@ func TestSealCountsUpdatedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open session for append: %v", err)
 	}
-	f.WriteString("\n" + `{"type":"assistant","content":"hi"}` + "\n")
-	f.Close()
+	if _, err := f.WriteString("\n" + `{"type":"assistant","content":"hi"}` + "\n"); err != nil {
+		t.Fatalf("f.WriteString: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("f.Close: %v", err)
+	}
 
 	stats, err := Seal(cfg, identity.Recipient(), false, nil)
 	if err != nil {
@@ -910,10 +936,14 @@ func TestUnsealDoesNotDeleteUnmanagedFiles(t *testing.T) {
 
 	// Add a file that doesn't match include patterns (unmanaged)
 	unmanagedPath := filepath.Join(claudeDir, "custom-script.sh")
-	os.WriteFile(unmanagedPath, []byte("#!/bin/bash\necho hi"), 0755)
+	if err := os.WriteFile(unmanagedPath, []byte("#!/bin/bash\necho hi"), 0755); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	// Seal (won't include custom-script.sh)
-	Seal(cfg, identity.Recipient(), false, nil)
+	if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
 
 	// Unseal should NOT delete the unmanaged file
 	_, err := Unseal(cfg, identity, false, nil)
@@ -948,7 +978,9 @@ func TestContentHash(t *testing.T) {
 func TestObjectStoreWriteReadExists(t *testing.T) {
 	sealDir := t.TempDir()
 	store := NewObjectStore(sealDir)
-	store.Init()
+	if err := store.Init(); err != nil {
+		t.Fatalf("store.Init: %v", err)
+	}
 
 	data := []byte("encrypted data here")
 	hash := "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
@@ -1021,16 +1053,24 @@ func TestStatus(t *testing.T) {
 	// Modify a file
 	historyPath := filepath.Join(claudeDir, "history.jsonl")
 	f, _ := os.OpenFile(historyPath, os.O_APPEND|os.O_WRONLY, 0644)
-	f.WriteString(`{"display":"new status entry","timestamp":3}` + "\n")
-	f.Close()
+	if _, err := f.WriteString(`{"display":"new status entry","timestamp":3}` + "\n"); err != nil {
+		t.Fatalf("f.WriteString: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("f.Close: %v", err)
+	}
 
 	// Add a new file
 	newSessionPath := filepath.Join(claudeDir, "projects", "proj-a", "status-new.jsonl")
-	os.WriteFile(newSessionPath, []byte(`{"type":"user","message":"status"}`+"\n"), 0644)
+	if err := os.WriteFile(newSessionPath, []byte(`{"type":"user","message":"status"}`+"\n"), 0644); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
+	}
 
 	// Delete a file
 	deletePath := filepath.Join(claudeDir, "CLAUDE.md")
-	os.Remove(deletePath)
+	if err := os.Remove(deletePath); err != nil {
+		t.Fatalf("os.Remove: %v", err)
+	}
 
 	mixedStatus, err := Status(cfg)
 	if err != nil {

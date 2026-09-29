@@ -73,7 +73,7 @@ func TestPushE2E(t *testing.T) {
 	os.Stdout = devNull
 	t.Cleanup(func() {
 		os.Stdout = oldStdout
-		devNull.Close()
+		_ = devNull.Close()
 	})
 
 	t.Run("MissingRemote", func(t *testing.T) {
@@ -93,8 +93,12 @@ func TestPushE2E(t *testing.T) {
 		}
 
 		// Create files to be sealed
-		os.MkdirAll(filepath.Join(claudeDir, "commands"), 0700)
-		os.WriteFile(filepath.Join(claudeDir, "commands", "file1.txt"), []byte("data"), 0644)
+		if err := os.MkdirAll(filepath.Join(claudeDir, "commands"), 0700); err != nil {
+			t.Fatalf("os.MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(claudeDir, "commands", "file1.txt"), []byte("data"), 0644); err != nil {
+			t.Fatalf("os.WriteFile: %v", err)
+		}
 
 		cmd := &cobra.Command{}
 		err := runPush(cmd, []string{"origin"})
@@ -116,7 +120,9 @@ func TestPushE2E(t *testing.T) {
 
 	t.Run("SubsequentPush", func(t *testing.T) {
 		// Modify file and run push again
-		os.WriteFile(filepath.Join(claudeDir, "commands", "file1.txt"), []byte("modified data"), 0644)
+		if err := os.WriteFile(filepath.Join(claudeDir, "commands", "file1.txt"), []byte("modified data"), 0644); err != nil {
+			t.Fatalf("os.WriteFile: %v", err)
+		}
 
 		cmd := &cobra.Command{}
 		err := runPush(cmd, []string{"origin"})
