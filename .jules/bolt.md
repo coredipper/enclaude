@@ -1,0 +1,3 @@
+## 2026-09-29 - Exact Map lookup vs string iteration for small arrays
+**Learning:** For very small arrays (e.g. 5-10 elements), iterating over a string array and performing string comparisons can be significantly faster than hashing a string and performing an O(1) map lookup. I previously attempted to replace an O(N) array iteration for exact patterns with a map, but since the number of patterns was tiny, the hashing overhead made the function 2x slower.
+**Action:** Next time I optimize scanning algorithms, measure the typical input size before blindly switching O(N) slice operations to O(1) map lookups, as map overhead dominates on small N.
