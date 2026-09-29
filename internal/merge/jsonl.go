@@ -100,11 +100,6 @@ func MergeJSONL(ours, theirs []byte) ([]byte, error) {
 // MergeSessionsIndex merges two sessions-index.json files.
 // These are JSON objects with an "entries" array; we deduplicate by sessionId.
 func MergeSessionsIndex(ours, theirs []byte) ([]byte, error) {
-	type indexFile struct {
-		Entries []json.RawMessage `json:"entries"`
-		rest    map[string]json.RawMessage
-	}
-
 	oursObj, oursEntries, err := parseIndexFile(ours)
 	if err != nil {
 		return nil, fmt.Errorf("parsing ours: %w", err)

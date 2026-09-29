@@ -107,10 +107,6 @@ using the ldflag path.
    $existing"
    ```
 
-Known nit: goreleaser warns that `archives.format` is deprecated in
-favour of `formats: [...]`. Fix opportunistically when touching
-`.goreleaser.yaml`.
-
 ## Working with PRs from forks
 
 If a fork PR has `maintainerCanModify: true` (the "Allow edits from
