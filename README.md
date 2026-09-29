@@ -237,6 +237,8 @@ patterns = [
 "projects/*/memory/**" = "text_merge"
 ```
 
+The example above is abbreviated; the default configuration includes additional include/exclude patterns and merge strategies.
+
 ## Security Model
 
 | Property | Status |
