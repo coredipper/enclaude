@@ -20,7 +20,7 @@ test-verbose:
 	go test ./... -v -count=1
 
 lint:
-	golangci-lint run
+	golangci-lint run --max-issues-per-linter=0 --max-same-issues=0
 
 clean:
 	rm -f enclaude
