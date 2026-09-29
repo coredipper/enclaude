@@ -586,6 +586,7 @@ func Status(cfg *config.Config) (*DiffResult, error) {
 
 	// Build a "current" manifest from disk
 	current := NewManifest(cfg.Seal.DeviceID)
+	current.Files = make(map[string]FileEntry, len(files))
 
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -672,7 +673,7 @@ func UnsealStatus(cfg *config.Config, opts ...UnsealOption) (*DiffResult, error)
 	}
 
 	// Build current state from disk
-	onDisk := make(map[string]string) // relPath -> hash
+	onDisk := make(map[string]string, len(files)) // relPath -> hash
 
 	var mu sync.Mutex
 	var wg sync.WaitGroup
