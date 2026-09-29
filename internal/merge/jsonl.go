@@ -141,7 +141,11 @@ func MergeSessionsIndex(ours, theirs []byte) ([]byte, error) {
 	// Build output — merge top-level keys from both sides.
 	// Start with theirs, then overlay ours so ours takes precedence
 	// for shared keys. This preserves metadata from theirs that ours lacks.
-	// We can reuse theirsObj to save map allocations
+	// theirsObj is reused as the output map to save an allocation; a
+	// literal `null` document unmarshals to a nil map, so allocate then.
+	if theirsObj == nil {
+		theirsObj = make(map[string]json.RawMessage, len(oursObj)+1)
+	}
 	for k, v := range oursObj {
 		theirsObj[k] = v
 	}
