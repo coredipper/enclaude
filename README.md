@@ -4,7 +4,7 @@ Encrypted, git-backed, cross-device sync for `~/.claude/`.
 
 ## The Problem
 
-Claude Code stores everything in `~/.claude/` as plain text. That includes:
+Claude Code stores everything in `~/.claude/` as plaintext. That includes:
 
 - **`history.jsonl`** - every prompt you've typed, timestamped
 - **Session JSONL files** - full transcripts, including tool calls, tool results and any file contents Claude read
@@ -13,7 +13,7 @@ Claude Code stores everything in `~/.claude/` as plain text. That includes:
 
 So `~/.claude/` holds a detailed record of your work, including code snippets, error messages, file paths, environment variables and anything else that came up in a session. None of it is encrypted, signed or checked for tampering.
 
-Most AI coding assistants work this way (Cursor, Copilot and Windsurf also store history in plain text). It means:
+Most AI coding assistants work this way (Cursor, Copilot and Windsurf also store history in plaintext). It means:
 
 1. **Anyone with access to your disk can read your full Claude history.** If your laptop is lost, stolen or used by someone else, all session data is exposed.
 2. **There's no way to sync sessions across devices.** Your history on your work laptop and your personal machine stay separate.
@@ -26,7 +26,7 @@ Most AI coding assistants work this way (Cursor, Copilot and Windsurf also store
 `enclaude` sits between Claude Code and your filesystem and leaves Claude Code itself untouched. It uses two directories:
 
 ```
-~/.claude/              plain text (what Claude Code reads/writes)
+~/.claude/              plaintext (what Claude Code reads/writes)
      |
      |  seal (encrypt)
      v
@@ -45,7 +45,7 @@ Most AI coding assistants work this way (Cursor, Copilot and Windsurf also store
 
 **Unseal** decrypts the objects back to `~/.claude/` so Claude Code can use them.
 
-**Git** moves the data between machines. The encrypted objects are committed to a git repository, which gives you version history and remote sync. Only encrypted blobs are pushed, so your plain text stays on your machine.
+**Git** moves the data between machines. The encrypted objects are committed to a git repository, which gives you version history and remote sync. Only encrypted blobs are pushed, so your plaintext stays on your machine.
 
 **Purge plaintext** is a separate step. `seal` leaves `~/.claude/` in place because Claude Code reads it directly. After sealing, `enclaude purge-plaintext` removes session transcripts that have a recoverable encrypted copy. Add `--shred` to overwrite before removal.
 
@@ -83,7 +83,7 @@ enclaude unseal
 
 ```bash
 # Create a private repo for your encrypted data
-# (only encrypted blobs are pushed, your plain text stays on your machine)
+# (only encrypted blobs are pushed, your plaintext stays on your machine)
 enclaude remote add origin git@github.com:you/enclaude-data.git
 enclaude push
 
@@ -244,7 +244,7 @@ The example above is abbreviated; the default configuration includes additional 
 | Property | Status |
 |----------|--------|
 | Encrypted at rest (between sessions) | Encrypted copy yes; local plaintext remains unless you run `purge-plaintext` |
-| Encrypted at rest (during active session) | No, Claude Code needs plain text to run |
+| Encrypted at rest (during active session) | No, Claude Code needs plaintext to run |
 | Encrypted in transit (git push/pull) | Yes, only age-encrypted blobs are pushed |
 | Key storage | OS keychain (macOS Keychain, Linux secret-service) |
 | Key backup | Passphrase-encrypted `key.age.backup` travels with the repo |
