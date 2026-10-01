@@ -29,12 +29,12 @@ A new command goes in a new file under `cmd/`. New encryption or storage code go
 
 ## Build and test
 
-| Task    | Command                                       |
-|---------|-----------------------------------------------|
-| Build   | `make build`                                  |
-| Install | `make install`                                |
-| Test    | `make test` (runs `go test ./... -count=1`)   |
-| Lint    | `make lint` (golangci-lint)                   |
+| Task    | Command                                                                                |
+|---------|----------------------------------------------------------------------------------------|
+| Build   | `make build`                                                                           |
+| Install | `make install`                                                                         |
+| Test    | `make test` (runs `go test ./... -count=1`), or `make test-verbose` for verbose output |
+| Lint    | `make lint` (golangci-lint)                                                            |
 
 CI (`.github/workflows/ci.yml`) runs the tests, golangci-lint and a build for Linux and macOS on both amd64 and arm64, on every PR and every push to `main`. All of these must pass before merging.
 
