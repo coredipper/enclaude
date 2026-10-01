@@ -1,6 +1,6 @@
 # enclaude project notes
 
-enclaude encrypts `~/.claude/` and syncs it between machines through git. [`README.md`](README.md) explains the tool for users. This file is for working on the code.
+Encrypted, git-backed, cross-device sync for `~/.claude/`. [`README.md`](README.md) explains the tool for users. This file is for working on the code.
 
 ## Important rules
 
