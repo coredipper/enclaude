@@ -56,7 +56,7 @@ CI (`.github/workflows/ci.yml`) runs the tests, golangci-lint and a build for Li
   Keep each comment directly above its own function. Putting a new function between an existing comment and its function leaves that comment attached to the wrong test.
 - For tests that need the keyring to fail in a controlled way, replace the package's `keyringSet`, `keyringGet` and `keyringDelete` variables rather than using `go-keyring`'s global mock.
 
-## Releasing
+## Release flow
 
 1. Merge the PRs for the release into `main` and check that `make test` passes.
 2. Pick the new version number. A new feature raises the minor number, a release with only fixes raises the patch number.
