@@ -1,6 +1,6 @@
 # enclaude project notes
 
-Encrypted, git-backed, cross-device sync for `~/.claude/`. [`README.md`](README.md) explains the tool for users. This file is for working on the code.
+Encrypted, git-backed, cross-device sync for `~/.claude/`. See [`README.md`](README.md) for the user-facing pitch. This file is for working on the code.
 
 ## Important rules
 
