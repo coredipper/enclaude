@@ -57,7 +57,7 @@ Once a Claude Code session ends, its JSONL file never changes again. This makes 
 - `history.jsonl` is append-only, so two copies are merged by removing duplicate lines and sorting by timestamp
 - Memory files are small Markdown files, merged with a 3-way merge that adds conflict markers if both sides changed
 
-Only `settings.json` (last write wins) and `history.jsonl` (line-level dedup) need real merge logic.
+Only `settings.json` (last write wins) and `history.jsonl` (line-level dedup) need real merge logic. Everything else is either immutable or trivially mergeable.
 
 ## Quick Start
 
@@ -101,7 +101,7 @@ Claude Code stores per-project state under `~/.claude/projects/<encoded>/`, wher
 (e.g. `/Users/you/code/app` → `-Users-you-code-app`). That path differs between
 machines with different home directories or checkout locations, so a project
 sealed on one machine would otherwise restore under a key the other machine's
-Claude Code never looks at. The data would be there and decrypted, but Claude Code wouldn't find it.
+Claude Code never looks at. The data is present and decrypted, just invisible.
 
 `enclaude unseal` detects project dirs sealed on another machine and offers to
 remap them to this machine's key. By default it asks you to accept the
