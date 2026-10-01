@@ -271,7 +271,7 @@ Like git itself, `enclaude` stores objects by their content hash. When you seal 
 4. Store the encrypted blob at `objects/<hash[0:2]>/<hash[2:]>.age`
 5. Record the mapping in `manifest.json`
 
-On the next seal, unchanged files produce the same hash and are skipped entirely. Only new or modified files are encrypted. This keeps repeat seals fast.
+On the next seal, unchanged files produce the same hash and are skipped entirely. Only new or modified files are encrypted. This makes incremental seals fast, typically under 1 second after a normal session.
 
 ### Session Lifecycle
 
