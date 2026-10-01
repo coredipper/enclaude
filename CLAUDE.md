@@ -45,7 +45,7 @@ CI (`.github/workflows/ci.yml`) runs the tests, golangci-lint and a build for Li
 ## Test conventions
 
 - Tests sit next to the code they test (`foo.go` and `foo_test.go`). Use the standard `testing` package only, not testify.
-- Every test function has a comment above it in this shape.
+- Every test function has a comment above it in this shape:
 
   ```go
   // TestX_Subcase verifies/exercises/covers/guards [what], [why if
@@ -98,7 +98,7 @@ Several AI coding agents write PRs on this repo and push them under the maintain
 
 | Branch prefix | Agent    | Area                      | Title emoji |
 |---------------|----------|---------------------------|-------------|
-| `bolt-*`      | Bolt     | Performance               | ⚡           |
+| `bolt-*`      | Bolt     | Performance optimizations | ⚡           |
 | `sentinel-*`  | Sentinel | Security fixes            | 🛡️ / 🔒     |
 | `jules-*`     | Jules    | Code cleanup              | 🧹           |
 
