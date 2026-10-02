@@ -4,26 +4,26 @@ Encrypted, git-backed, cross-device sync for `~/.claude/`.
 
 ## The Problem
 
-Claude Code stores everything in plaintext at `~/.claude/`:
+Claude Code stores everything in `~/.claude/` as plaintext. That includes:
 
-- **`history.jsonl`** — every prompt you've ever typed, timestamped
-- **Session JSONL files** — full conversation transcripts including tool calls, tool results, and any file content Claude read during the session
-- **Memory files** — project-specific context Claude remembers between sessions
-- **Settings and stats** — your configuration, usage patterns, plugin list
+- **`history.jsonl`** - every prompt you've typed, timestamped
+- **Session JSONL files** - full transcripts, including tool calls, tool results and any file contents Claude read
+- **Memory files** - project context Claude remembers between sessions
+- **Settings and stats** - your configuration, usage patterns and plugin list
 
-This means your `~/.claude/` directory contains a detailed record of your work: code snippets, error messages, file paths, environment variables, and anything else that appeared in a session. It sits on disk as readable text with no encryption, no signatures, and no tamper detection.
+So `~/.claude/` holds a detailed record of your work, including code snippets, error messages, file paths, environment variables and anything else that came up in a session. None of it is encrypted, signed or checked for tampering.
 
-This isn't a bug — it's how every AI coding assistant works today (Cursor, Copilot, Windsurf all store history in plaintext too). But it means:
+Most AI coding assistants work this way (Cursor, Copilot and Windsurf also store history in plaintext). It means:
 
-1. **Anyone with access to your disk can read your full Claude history.** If your laptop is lost, stolen, or accessed by another user, all session data is exposed.
-2. **There's no way to sync sessions across devices.** Your history on your work laptop and your personal machine are completely separate.
+1. **Anyone with access to your disk can read your full Claude history.** If your laptop is lost, stolen or used by someone else, all session data is exposed.
+2. **There's no way to sync sessions across devices.** Your history on your work laptop and your personal machine stay separate.
 3. **There's no version history.** If a session file is corrupted or a memory file is overwritten, there's no way to recover a previous state.
 
 `enclaude` addresses all three.
 
 ## What It Does
 
-`enclaude` sits between Claude Code and your filesystem. It doesn't modify Claude Code — it works alongside it using a two-directory architecture:
+`enclaude` sits between Claude Code and your filesystem and leaves Claude Code itself untouched. It uses two directories:
 
 ```
 ~/.claude/              plaintext (what Claude Code reads/writes)
@@ -41,23 +41,23 @@ This isn't a bug — it's how every AI coding assistant works today (Cursor, Cop
   remote repo           synced across devices
 ```
 
-**Seal** encrypts changed files from `~/.claude/` into content-addressed objects using [age](https://age-encryption.org/) (ChaCha20-Poly1305 + X25519). Each file is hashed (SHA-256) and encrypted individually. Only changed files are re-encrypted — unchanged files are skipped by comparing hashes.
+**Seal** encrypts changed files from `~/.claude/` into content-addressed objects using [age](https://age-encryption.org/) (ChaCha20-Poly1305 + X25519). Each file is hashed (SHA-256) and encrypted individually. Unchanged files are skipped by comparing hashes.
 
 **Unseal** decrypts the objects back to `~/.claude/` so Claude Code can use them.
 
-**Git** provides the transport layer. The encrypted objects are committed to a git repository, giving you full version history, branching, and remote sync — all on encrypted data. Your plaintext never leaves your machine; only encrypted blobs are pushed.
+**Git** moves the data between machines. The encrypted objects are committed to a git repository, which gives you version history and remote sync. Only encrypted blobs are pushed, so your plaintext stays on your machine.
 
-**Purge plaintext** is explicit. By default, `seal` leaves `~/.claude/` in place because Claude Code reads it directly. After sealing, you can remove sealed plaintext session transcripts with `enclaude purge-plaintext`; it removes only files whose encrypted object is recoverable. Add `--shred` to overwrite before removal.
+**Purge plaintext** is a separate step. `seal` leaves `~/.claude/` in place because Claude Code reads it directly. After sealing, `enclaude purge-plaintext` removes session transcripts that have a recoverable encrypted copy. Add `--shred` to overwrite before removal.
 
 ### Why This Works Well for Claude Data
 
-Claude Code's session files have a property that makes sync trivial: **they're immutable after completion**. Once a session ends, its JSONL file is never modified again. This means:
+Once a Claude Code session ends, its JSONL file never changes again. This makes syncing simple:
 
-- Two devices that both ran sessions produce different files with different hashes — no conflicts, just union both sides
-- `history.jsonl` is append-only — merging two diverged copies means deduplicating lines and sorting by timestamp
-- Memory files are small markdown — a simple whole-file 3-way merge handles one-sided edits and writes conflict markers if both sides changed
+- Sessions from two devices are different files with different hashes, so both sides are kept
+- `history.jsonl` is append-only, so two copies are merged by removing duplicate lines and sorting by timestamp
+- Memory files are small Markdown files, merged with a 3-way merge that adds conflict markers if both sides changed
 
-The only files that need real merge logic are `settings.json` (last-write-wins) and `history.jsonl` (line-level dedup). Everything else is either immutable or trivially mergeable.
+Only `settings.json` (last write wins) and `history.jsonl` (line-level dedup) need real merge logic. Everything else is either immutable or trivially mergeable.
 
 ## Quick Start
 
@@ -65,7 +65,7 @@ The only files that need real merge logic are `settings.json` (last-write-wins) 
 # Install
 go install github.com/coredipper/enclaude@latest
 
-# Initialize — generates an age key, stores it in your OS keychain,
+# Initialize: generates an age key, stores it in your OS keychain,
 # encrypts all ~/.claude/ data into ~/.enclaude/
 enclaude init
 
@@ -83,11 +83,11 @@ enclaude unseal
 
 ```bash
 # Create a private repo for your encrypted data
-# (only encrypted blobs are pushed — your plaintext never leaves your machine)
+# (only encrypted blobs are pushed, your plaintext stays on your machine)
 enclaude remote add origin git@github.com:you/enclaude-data.git
 enclaude push
 
-# On another device — clone the encrypted repo and import your key
+# On another device, clone the encrypted repo and import your key
 git clone git@github.com:you/enclaude-data.git ~/.enclaude
 enclaude key import --from-backup   # or: enclaude key import keyfile.txt
 enclaude unseal
@@ -101,11 +101,11 @@ Claude Code stores per-project state under `~/.claude/projects/<encoded>/`, wher
 (e.g. `/Users/you/code/app` → `-Users-you-code-app`). That path differs between
 machines with different home directories or checkout locations, so a project
 sealed on one machine would otherwise restore under a key the other machine's
-Claude Code never looks at — the data is present and decrypted, just invisible.
+Claude Code never looks at. The data is present and decrypted, just invisible.
 
 `enclaude unseal` detects project dirs sealed on another machine and offers to
-remap them to this machine's key. By default it's interactive — accept the
-proposed local key, edit it, or skip — and your choices are remembered
+remap them to this machine's key. By default it asks you to accept the
+proposed local key, edit it or skip it, and your choices are remembered
 per-device. Control it with `--remap`:
 
 ```bash
@@ -126,9 +126,8 @@ enclaude project unmap <src>          # remove a pinned mapping
 ```
 
 Mappings live in `~/.enclaude/projectmap.local.toml`, which is device-local and
-never synced. **Note:** only the project *directory key* is remapped so the
-project becomes discoverable — absolute paths embedded inside transcripts (cwd,
-tool arguments) are left as a historical record and are not rewritten.
+never synced. Only the project *directory key* is remapped. Absolute paths
+inside transcripts (cwd, tool arguments) keep the original machine's paths.
 
 ### Auto-Sync with Hooks
 
@@ -136,7 +135,7 @@ tool arguments) are left as a historical record and are not rewritten.
 enclaude hooks install
 ```
 
-This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a session starts, `enclaude` unseals the latest sealed data. When it ends, it seals changes locally. To enable automatic remote sync, set `auto_push = true` and `auto_pull = true` in `~/.enclaude/seal.toml`. Your existing hooks (peon-ping, notchi, etc.) are preserved — the installer appends to the hooks array, never overwrites.
+This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a session starts, `enclaude` unseals the latest sealed data. When it ends, it seals changes locally. To enable automatic remote sync, set `auto_push = true` and `auto_pull = true` in `~/.enclaude/seal.toml`. The installer adds to your existing hooks (peon-ping, notchi, etc.) and never overwrites them.
 
 ## Commands
 
@@ -147,10 +146,10 @@ This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. Wh
 | `seal` | Encrypt changed files, commit to seal store |
 | `unseal` | Decrypt seal store to `~/.claude/` |
 | `status` | Show changes since last seal |
-| `sync` | Seal + pull + push (the daily driver) |
+| `sync` | Seal + pull + push |
 | `push` | Seal + git push |
 | `pull` | Git pull + merge + unseal |
-| `purge-plaintext` | Remove sealed completed session plaintext from `~/.claude/` |
+| `purge-plaintext` | Remove sealed completed session plaintext from `~/.claude/` (`--all-managed` removes every recoverable managed file) |
 
 ### History & Recovery
 | Command | Description |
@@ -173,11 +172,12 @@ This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. Wh
 | `repair` | Verify integrity and fix missing objects by re-sealing from plaintext |
 | `repair --check` | Verify-only mode (exit code 1 if issues found, useful for CI) |
 | `repair --delete-orphans` | Also remove unreferenced object files |
+| `remote add/list/edit/remove` | Manage git remotes used for sync |
+| `upgrade` | Upgrade `seal.toml` to the latest config version |
 | `hooks install` | Add auto-sync hooks to Claude Code settings |
 | `hooks remove` | Remove auto-sync hooks |
 | `hooks status` | Check if hooks are installed |
 | `readme-regen` | Regenerate and commit README.md in the seal store |
-| `purge-plaintext` | Remove sealed completed session plaintext (`--all-managed` removes every recoverable matching managed file) |
 | `project list` | List synced project dirs and their local/foreign status |
 | `project map <src> <target>` | Pin a device-local project-key remap |
 | `project unmap <src>` | Remove a pinned project-key remap |
@@ -223,10 +223,10 @@ patterns = [
 
 [exclude]
 patterns = [
-  "statsig/**",       # feature flag caches — regenerated automatically
-  "plugins/**",       # 200+ MB of cached plugin data — regenerated
+  "statsig/**",       # feature flag caches, regenerated automatically
+  "plugins/**",       # 200+ MB of cached plugin data, regenerated
   "debug/**",         # debug logs
-  "hooks/**",         # your hook scripts — version these separately
+  "hooks/**",         # your hook scripts, version these separately
   "settings.local.json",  # device-specific paths and permissions
 ]
 
@@ -244,20 +244,20 @@ The example above is abbreviated; the default configuration includes additional 
 | Property | Status |
 |----------|--------|
 | Encrypted at rest (between sessions) | Encrypted copy yes; local plaintext remains unless you run `purge-plaintext` |
-| Encrypted at rest (during active session) | No — Claude Code requires plaintext to function |
-| Encrypted in transit (git push/pull) | Yes — only age-encrypted blobs are pushed |
-| Key storage | OS keychain (macOS Keychain, Linux secret-service, Windows Credential Manager) |
+| Encrypted at rest (during active session) | No, Claude Code needs plaintext to run |
+| Encrypted in transit (git push/pull) | Yes, only age-encrypted blobs are pushed |
+| Key storage | OS keychain (macOS Keychain, Linux secret-service) |
 | Key backup | Passphrase-encrypted `key.age.backup` travels with the repo |
 | Tamper detection | SHA-256 content hashes in manifest; `repair --check` verifies integrity |
-| Key never in git | Correct — only the passphrase-encrypted backup is committed |
+| Key never in git | Yes, only the passphrase-encrypted backup is committed |
 
-### Honest Limitations
+### Limitations
 
-- **During an active Claude Code session, plaintext exists on disk.** This is unavoidable — Claude Code reads `~/.claude/` directly and cannot be modified to read encrypted data. Use OS-level disk encryption (FileVault, BitLocker, LUKS) for protection during sessions.
+- **During an active Claude Code session, plaintext exists on disk.** Claude Code reads `~/.claude/` directly and can't read encrypted data. Use disk encryption (FileVault, LUKS) to cover active sessions.
 - **Sealing does not delete plaintext.** Run `enclaude purge-plaintext` after a successful seal to remove completed session transcripts, or `enclaude purge-plaintext --all-managed --yes` if you intentionally want to remove every managed plaintext file that still matches a recoverable sealed object.
-- **Application-level encryption does not protect against a malicious process running as your user.** If an attacker has code execution as your user, they can read decrypted files in memory or extract the key from the keychain. OS-level protections are the right defense layer here.
-- **The encryption key must be shared across devices.** This is inherent to any cross-device sync scheme. Use `key export` to save your key in a password manager, or rely on the passphrase-encrypted `key.age.backup` that travels with the repo.
-- **Cross-device project remap only fixes the directory key.** `unseal` places a synced project where the local Claude Code looks (see [Projects Across Devices](#projects-across-devices)), but absolute paths embedded inside transcripts (cwd, tool arguments) keep the originating machine's paths as a historical record — they are not rewritten, and Claude Code does not re-execute them.
+- **Malicious code running as your user can still read your data.** It can read decrypted files or take the key from the keychain. Rely on OS-level protections for this.
+- **Every device needs the same encryption key.** Use `key export` to save your key in a password manager, or rely on the passphrase-encrypted `key.age.backup` that travels with the repo.
+- **Cross-device project remap only fixes the directory key.** `unseal` places a synced project where the local Claude Code looks (see [Projects Across Devices](#projects-across-devices)), but absolute paths inside transcripts (cwd, tool arguments) keep the original machine's paths. Claude Code doesn't re-run them.
 
 ## How It Works Under the Hood
 
@@ -271,21 +271,21 @@ Like git itself, `enclaude` stores objects by their content hash. When you seal 
 4. Store the encrypted blob at `objects/<hash[0:2]>/<hash[2:]>.age`
 5. Record the mapping in `manifest.json`
 
-On the next seal, unchanged files produce the same hash and are skipped entirely. Only new or modified files are encrypted. This makes incremental seals fast — typically under 1 second after a normal session.
+On the next seal, unchanged files produce the same hash and are skipped entirely. Only new or modified files are encrypted. This makes incremental seals fast, typically under 1 second after a normal session.
 
 ### Session Lifecycle
 
 With hooks installed, the flow is:
 
 ```
-Session starts → hook fires → pull latest + unseal
+Session starts → hook fires → pull (if auto_pull) + unseal
     ↓
 Claude Code runs (reads/writes ~/.claude/ as normal)
     ↓
-Session ends → hook fires → seal changes + push
+Session ends → hook fires → seal changes + push (if auto_push)
 ```
 
-The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent concurrent seal/unseal operations. If the lock can't be acquired within 5 seconds, the hook exits silently — it never blocks Claude Code.
+The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent concurrent seal/unseal operations. If it can't get the lock within 5 seconds, the hook exits quietly so Claude Code is never blocked.
 
 ### New Device Onboarding
 
