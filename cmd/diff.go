@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -47,7 +46,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	store := sealstore.NewObjectStore(sealDir)
 
 	// Load current manifest
-	currentManifest, err := sealstore.LoadManifest(sealDir)
+	currentManifest, err := sealstore.LoadManifest(sealDir, identity)
 	if err != nil {
 		return fmt.Errorf("loading current manifest: %w", err)
 	}
@@ -61,16 +60,13 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot read manifest at %s: %w", ref, err)
 	}
 
-	var oldManifest sealstore.Manifest
-	if err := json.Unmarshal([]byte(oldManifestJSON), &oldManifest); err != nil {
-		return fmt.Errorf("parsing manifest at %s: %w", ref, err)
-	}
-	if oldManifest.Files == nil {
-		oldManifest.Files = make(map[string]sealstore.FileEntry)
+	oldManifest, err := sealstore.ParseManifest([]byte(oldManifestJSON), identity)
+	if err != nil {
+		return fmt.Errorf("manifest at %s: %w", ref, err)
 	}
 
 	// Diff manifests
-	diff := currentManifest.Diff(&oldManifest)
+	diff := currentManifest.Diff(oldManifest)
 
 	if len(diff.Added) == 0 && len(diff.Modified) == 0 && len(diff.Deleted) == 0 {
 		fmt.Printf("No changes between %s and current seal store.\n", ref)

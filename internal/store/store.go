@@ -205,13 +205,15 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 	trackDeleted(manifest, seen, verbose, &stats)
 	tallySessions(manifest, prior, &stats)
 
-	// Persist only when something real changed (content, first seal, or a
-	// DeviceID/OriginHome refresh): Save rewrites sealed_at, and a
+	// Persist only when something real changed (content, first seal, a
+	// DeviceID/OriginHome refresh, or encrypt_names switched since the last
+	// write): Save rewrites sealed_at, and a
 	// timestamp-only rewrite hands the staged-diff commit gate a manifest
 	// change, turning every scheduled no-op seal into a commit.
 	if stats.HasChanges() || !existed ||
-		manifest.DeviceID != priorDeviceID || manifest.OriginHome != priorOriginHome {
-		if err := manifest.Save(sealDir); err != nil {
+		manifest.DeviceID != priorDeviceID || manifest.OriginHome != priorOriginHome ||
+		manifest.encrypted != cfg.Seal.EncryptNames {
+		if err := manifest.Save(sealDir, NameRecipients(cfg, recipient)...); err != nil {
 			return stats, fmt.Errorf("saving manifest: %w", err)
 		}
 	}
@@ -460,7 +462,7 @@ func Unseal(cfg *config.Config, identity age.Identity, verbose bool, progress Pr
 
 	store := NewObjectStore(sealDir)
 
-	manifest, err := LoadManifest(sealDir)
+	manifest, err := LoadManifest(sealDir, identity)
 	if err != nil {
 		return stats, fmt.Errorf("loading manifest: %w", err)
 	}
@@ -783,7 +785,7 @@ func (s PurgePlaintextStats) Multiline(indent string, dryRun bool) string {
 func PurgePlaintext(cfg *config.Config, identity age.Identity, scope PurgeScope, shred, dryRun, verbose bool) (PurgePlaintextStats, error) {
 	var stats PurgePlaintextStats
 
-	manifest, err := LoadManifest(cfg.Seal.SealDir)
+	manifest, err := LoadManifest(cfg.Seal.SealDir, identity)
 	if err != nil {
 		return stats, fmt.Errorf("loading manifest: %w", err)
 	}
@@ -1285,7 +1287,7 @@ func Verify(cfg *config.Config, identity age.Identity, verbose bool) (*RepairRes
 	store := NewObjectStore(sealDir)
 	result := &RepairResult{}
 
-	manifest, err := LoadManifest(sealDir)
+	manifest, err := LoadManifest(sealDir, identity)
 	if err != nil {
 		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
@@ -1357,12 +1359,13 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 		return nil, err
 	}
 
-	manifest, err := LoadManifest(cfg.Seal.SealDir)
+	manifest, err := LoadManifest(cfg.Seal.SealDir, identity)
 	if err != nil {
 		return nil, fmt.Errorf("loading manifest: %w", err)
 	}
 
 	store := NewObjectStore(cfg.Seal.SealDir)
+	recipient := identity.(*age.X25519Identity).Recipient()
 
 	// Mirror Seal's PID-aware completion check so a Repair doesn't
 	// silently flip SessionComplete=true on currently-active session
@@ -1386,7 +1389,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 		}
 
 		hash := ContentHash(plaintext)
-		encrypted, err := crypto.Encrypt(plaintext, identity.(*age.X25519Identity).Recipient())
+		encrypted, err := crypto.Encrypt(plaintext, recipient)
 		if err != nil {
 			continue
 		}
@@ -1430,7 +1433,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 	// Save updated manifest before deleting any objects — if save fails,
 	// the old manifest still has valid references to existing objects.
 	if result.Fixed > 0 {
-		if err := manifest.Save(cfg.Seal.SealDir); err != nil {
+		if err := manifest.Save(cfg.Seal.SealDir, NameRecipients(cfg, recipient)...); err != nil {
 			return result, fmt.Errorf("saving manifest: %w", err)
 		}
 	}
@@ -1474,7 +1477,7 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 	sealDir := cfg.Seal.SealDir
 	store := NewObjectStore(sealDir)
 
-	manifest, err := LoadManifest(sealDir)
+	manifest, err := LoadManifest(sealDir, oldIdentity)
 	if err != nil {
 		return 0, rotationStoreUnchangedError(fmt.Errorf("loading manifest: %w", err))
 	}
@@ -1551,7 +1554,7 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 	}
 
 	// Save manifest (updates SealedAt timestamp)
-	if err := manifest.Save(sealDir); err != nil {
+	if err := manifest.Save(sealDir, NameRecipients(cfg, newRecipient)...); err != nil {
 		return len(applied), fmt.Errorf("saving manifest: %w", err)
 	}
 
