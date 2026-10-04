@@ -1524,6 +1524,14 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 		}
 	}
 
+	// Encode the manifest for the new key before any object changes, so a
+	// failure here still leaves the whole store on the old key.
+	manifest.SealedAt = time.Now().UTC().Format(time.RFC3339)
+	manifestData, err := manifest.Marshal(NameRecipients(cfg, newRecipient)...)
+	if err != nil {
+		return 0, rotationStoreUnchangedError(fmt.Errorf("encoding manifest: %w", err))
+	}
+
 	applied := make([]string, 0, len(hashes))
 	for _, hash := range hashes {
 		path, err := stagedObjectPath(newRoot, hash)
@@ -1553,9 +1561,18 @@ func Rotate(cfg *config.Config, oldIdentity age.Identity, newRecipient age.Recip
 		}
 	}
 
-	// Save manifest (updates SealedAt timestamp)
-	if err := manifest.Save(sealDir, NameRecipients(cfg, newRecipient)...); err != nil {
-		return len(applied), fmt.Errorf("saving manifest: %w", err)
+	if err := rotateManifestWrite(sealDir, manifestData); err != nil {
+		err = recoverRotationApplyFailure(
+			store, oldRoot, newRoot, hashes, applied,
+			fmt.Errorf("saving manifest: %w", err),
+		)
+		// A roll-forward leaves every object on the new key while the
+		// manifest on disk is still the old one, which with encrypt_names
+		// only the old key can open. Keep both keys.
+		if !IsRotationStoreUnchanged(err) && !IsRotationStoreAmbiguous(err) {
+			err = rotationStoreAmbiguousError(err)
+		}
+		return len(applied), err
 	}
 
 	return len(applied), nil
@@ -1594,6 +1611,10 @@ func rotationStoreAmbiguousError(err error) error {
 var rotateObjectWrite = func(store *ObjectStore, hash string, data []byte) error {
 	return store.Write(hash, data)
 }
+
+// rotateManifestWrite is a test hook for exercising a failed manifest save
+// after every object has been rotated.
+var rotateManifestWrite = writeManifest
 
 func recoverRotationApplyFailure(store *ObjectStore, oldRoot, newRoot string, allHashes, rollbackHashes []string, cause error) error {
 	rollbackErr := rollbackRotatedObjects(store, oldRoot, rollbackHashes)

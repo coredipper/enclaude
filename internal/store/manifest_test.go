@@ -469,6 +469,82 @@ func TestRotate_EncryptedManifest(t *testing.T) {
 	}
 }
 
+// failRotateManifestWrite makes Rotate's manifest save fail for the rest of
+// the test.
+func failRotateManifestWrite(t *testing.T) {
+	t.Helper()
+	orig := rotateManifestWrite
+	rotateManifestWrite = func(string, []byte) error { return errors.New("disk full") }
+	t.Cleanup(func() { rotateManifestWrite = orig })
+}
+
+// TestRotate_EncryptedManifestSaveFailureKeepsOldKey guards against a failed
+// manifest save after every object was rotated. The error used to be neither
+// old-key-safe nor ambiguous, so `key rotate` kept the new key while the
+// manifest stayed encrypted to the old one, which was then thrown away.
+func TestRotate_EncryptedManifestSaveFailureKeepsOldKey(t *testing.T) {
+	cfg, oldIdentity := encryptNamesSetup(t)
+	if _, err := Seal(cfg, oldIdentity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	failRotateManifestWrite(t)
+
+	newIdentity, _ := crypto.GenerateKey()
+	_, err := Rotate(cfg, oldIdentity, newIdentity.Recipient(), false, nil)
+	if !IsRotationStoreUnchanged(err) {
+		t.Fatalf("Rotate error = %v, want one marked old-key-safe", err)
+	}
+	m, err := LoadManifest(cfg.Seal.SealDir, oldIdentity)
+	if err != nil {
+		t.Fatalf("LoadManifest(old key): %v", err)
+	}
+	store := NewObjectStore(cfg.Seal.SealDir)
+	for _, hash := range uniqueManifestHashes(m) {
+		encrypted, err := store.Read(hash)
+		if err != nil {
+			t.Fatalf("reading object %s: %v", shortHash(hash), err)
+		}
+		if _, err := crypto.Decrypt(encrypted, oldIdentity); err != nil {
+			t.Errorf("old key should still decrypt %s: %v", shortHash(hash), err)
+		}
+	}
+}
+
+// TestRotate_ManifestSaveFailureWithFailedRollbackIsAmbiguous verifies that
+// when the manifest save fails and the objects then roll forward to the new
+// key instead of back, Rotate marks the state ambiguous so both keys are
+// kept: the objects need the new key and the manifest the old one.
+func TestRotate_ManifestSaveFailureWithFailedRollbackIsAmbiguous(t *testing.T) {
+	cfg, oldIdentity := encryptNamesSetup(t)
+	if _, err := Seal(cfg, oldIdentity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	m, _ := LoadManifest(cfg.Seal.SealDir, oldIdentity)
+	objects := len(uniqueManifestHashes(m))
+	failRotateManifestWrite(t)
+
+	// Writes 1..objects apply the rotation; the next is the first rollback.
+	origWrite := rotateObjectWrite
+	writeCalls := 0
+	rotateObjectWrite = func(store *ObjectStore, hash string, data []byte) error {
+		writeCalls++
+		if writeCalls == objects+1 {
+			return errors.New("rollback failed")
+		}
+		return origWrite(store, hash, data)
+	}
+	t.Cleanup(func() { rotateObjectWrite = origWrite })
+
+	newIdentity, _ := crypto.GenerateKey()
+	_, err := Rotate(cfg, oldIdentity, newIdentity.Recipient(), false, nil)
+	if !IsRotationStoreAmbiguous(err) {
+		t.Fatalf("Rotate error = %v, want one marked ambiguous", err)
+	}
+	if IsRotationStoreUnchanged(err) {
+		t.Fatalf("ambiguous error must not be marked old-key-safe: %v", err)
+	}
+}
+
 // TestRepair_EncryptedManifestStaysEncrypted verifies Repair, after
 // re-sealing a missing object, saves the manifest encrypted again.
 func TestRepair_EncryptedManifestStaysEncrypted(t *testing.T) {
