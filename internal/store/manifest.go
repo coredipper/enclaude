@@ -150,15 +150,16 @@ func (m *Manifest) Save(sealDir string, recipients ...age.Recipient) error {
 	if err != nil {
 		return err
 	}
-	if err := writeManifest(sealDir, data); err != nil {
+	if err := WriteManifest(sealDir, data); err != nil {
 		return err
 	}
 	m.encrypted = len(recipients) > 0
 	return nil
 }
 
-// writeManifest replaces manifest.json with data.
-func writeManifest(sealDir string, data []byte) error {
+// WriteManifest replaces manifest.json in sealDir with already encoded
+// manifest bytes.
+func WriteManifest(sealDir string, data []byte) error {
 	// Write beside the manifest and rename over it, so a command reading the
 	// manifest while a hook seals, or a crash mid-write, never sees half a
 	// file. That would fail to parse, and an encrypted one fails to decrypt.

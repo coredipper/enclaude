@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/coredipper/enclaude/internal/config"
@@ -156,5 +158,79 @@ func TestMergeManifests_EncryptedNamesWrongKey(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(sealDir, "manifest.json")); !os.IsNotExist(err) {
 		t.Errorf("failed merge wrote the seal manifest (stat err %v)", err)
+	}
+}
+
+// TestMergeManifests_ConcurrentReadersNeverSeeHalfAFile guards the merge
+// driver's write to the seal store's manifest.json: it used to truncate and
+// rewrite the file in place, so a command reading it at the same moment
+// could get half an encrypted manifest, which fails to decrypt.
+func TestMergeManifests_ConcurrentReadersNeverSeeHalfAFile(t *testing.T) {
+	sealDir := t.TempDir()
+	flagSealDir = sealDir
+	t.Cleanup(func() { flagSealDir = "" })
+
+	identity, _ := crypto.GenerateKey()
+	t.Setenv("ENCLAUDE_KEY", identity.String())
+	cfg := config.DefaultConfig(t.TempDir(), sealDir)
+	cfg.Seal.EncryptNames = true
+	if err := cfg.Save(sealDir); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	m := sealstore.NewManifest("dev")
+	for i := range 2000 {
+		m.Files[fmt.Sprintf("projects/p%d/session.jsonl", i)] = sealstore.FileEntry{ContentHash: strings.Repeat("a", 64)}
+	}
+	data, err := m.Marshal(identity.Recipient())
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	dir := t.TempDir()
+	ancestor, ours, theirs := filepath.Join(dir, "ancestor.json"), filepath.Join(dir, "ours.json"), filepath.Join(dir, "theirs.json")
+	for _, path := range []string{ancestor, ours, theirs, filepath.Join(sealDir, "manifest.json")} {
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	done := make(chan struct{})
+	errs := make(chan error, 1)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				got, err := sealstore.LoadManifest(sealDir, identity)
+				if err == nil && len(got.Files) != len(m.Files) {
+					err = fmt.Errorf("read %d files, want %d", len(got.Files), len(m.Files))
+				}
+				if err != nil {
+					select {
+					case errs <- err:
+					default:
+					}
+					return
+				}
+			}
+		}()
+	}
+	for range 200 {
+		if err := mergeManifests(ancestor, ours, theirs); err != nil {
+			t.Fatalf("mergeManifests: %v", err)
+		}
+	}
+	close(done)
+	wg.Wait()
+	select {
+	case err := <-errs:
+		t.Fatalf("reader saw a partial manifest: %v", err)
+	default:
 	}
 }

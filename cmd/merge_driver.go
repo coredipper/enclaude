@@ -141,7 +141,7 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 	}
 
 	// Also update the actual manifest.json in the seal store
-	if err := os.WriteFile(cfg.Seal.SealDir+"/manifest.json", mergedData, 0600); err != nil {
+	if err := sealstore.WriteManifest(cfg.Seal.SealDir, mergedData); err != nil {
 		return fmt.Errorf("writing seal manifest: %w", err)
 	}
 

@@ -1614,7 +1614,7 @@ var rotateObjectWrite = func(store *ObjectStore, hash string, data []byte) error
 
 // rotateManifestWrite is a test hook for exercising a failed manifest save
 // after every object has been rotated.
-var rotateManifestWrite = writeManifest
+var rotateManifestWrite = WriteManifest
 
 func recoverRotationApplyFailure(store *ObjectStore, oldRoot, newRoot string, allHashes, rollbackHashes []string, cause error) error {
 	rollbackErr := rollbackRotatedObjects(store, oldRoot, rollbackHashes)
