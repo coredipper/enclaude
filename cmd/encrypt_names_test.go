@@ -13,6 +13,7 @@ import (
 	"github.com/coredipper/enclaude/internal/gitops"
 	"github.com/coredipper/enclaude/internal/store"
 	"github.com/spf13/cobra"
+	"github.com/zalando/go-keyring"
 )
 
 // encryptedStore sets up a git-backed seal store with encrypt_names on, keyed
@@ -199,4 +200,36 @@ func TestEncryptNamesE2E_GitMergeRunsDriver(t *testing.T) {
 	assertFile(t, filepath.Join(restoreDir, "commands/base.md"), "base", base)
 	assertFile(t, filepath.Join(restoreDir, "commands/ours dir/ours.md"), "ours", oursAt)
 	assertFile(t, filepath.Join(restoreDir, "commands/théirs/theirs.md"), "theirs", theirsAt)
+}
+
+// TestEncryptNamesE2E_SealWithKeyFilePromptsOnce guards against seal asking
+// twice for the key file's passphrase: once for the key it encrypts with and
+// again to read the encrypted manifest.
+func TestEncryptNamesE2E_SealWithKeyFilePromptsOnce(t *testing.T) {
+	cfg, identity, git := encryptedStore(t)
+	writeAt(t, cfg.Seal.ClaudeDir, "commands/a.md", "A", time.Now())
+	sealAndCommit(t, cfg, identity, git, "commit A")
+
+	// From here on the key lives only in the passphrase-protected file.
+	keyring.MockInit()
+	t.Setenv("ENCLAUDE_KEY", "")
+	t.Setenv("ENCLAUDE_KEY_FILE", filepath.Join(t.TempDir(), "key.age.enc"))
+	if err := crypto.StoreKeyFile(identity, "test-passphrase"); err != nil {
+		t.Fatalf("StoreKeyFile: %v", err)
+	}
+	prompts := 0
+	orig := crypto.DefaultPassphraseFunc
+	crypto.DefaultPassphraseFunc = func(string, bool) (string, error) {
+		prompts++
+		return "test-passphrase", nil
+	}
+	t.Cleanup(func() { crypto.DefaultPassphraseFunc = orig })
+
+	writeAt(t, cfg.Seal.ClaudeDir, "commands/a.md", "B", time.Now())
+	if err := runSeal(&cobra.Command{}, nil); err != nil {
+		t.Fatalf("runSeal: %v", err)
+	}
+	if prompts != 1 {
+		t.Errorf("seal prompted for the passphrase %d times, want 1", prompts)
+	}
 }

@@ -57,6 +57,7 @@ func StoreKeyFile(identity *age.X25519Identity, passphrase string) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
 		return fmt.Errorf("creating key file directory: %w", err)
 	}
+	unlockedKeyFile.id = nil
 	if err := os.WriteFile(p, encrypted, 0600); err != nil {
 		return fmt.Errorf("writing key file: %w", err)
 	}
@@ -86,6 +87,7 @@ func DeleteKeyFile() error {
 	if err != nil {
 		return err
 	}
+	unlockedKeyFile.id = nil
 	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 		return err
 	}

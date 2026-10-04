@@ -66,7 +66,9 @@ func NewManifest(deviceID string) *Manifest {
 const ageHeader = "age-encryption.org/"
 
 // manifestIdentity supplies the key for an encrypted manifest when the caller
-// has none, as Seal and Status only hold the public key. Tests replace it.
+// passes none, as Seal and Status are given only the public key. LoadKey
+// remembers an unlocked key file, so this does not prompt a second time.
+// Tests replace it.
 var manifestIdentity = func() (age.Identity, error) {
 	id, _, err := crypto.LoadKey()
 	if err != nil {
