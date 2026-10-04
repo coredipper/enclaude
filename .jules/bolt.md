@@ -1,0 +1,3 @@
+## 2024-06-25 - Extraneous allocations in JSON parsing
+**Learning:** Found that `json.Unmarshal` takes `json.RawMessage` but internally does allocations when passed as a `map[string]json.RawMessage`. This can be optimized in multiple places where we simply need to parse or decode structures without the overhead. By using typed anonymous structs instead of nested maps with `json.RawMessage`, we avoid double-unmarshaling and save memory allocations.
+**Action:** Replace `json.Unmarshal` on `map[string]json.RawMessage` with strongly typed anonymous structs if we only need a few keys (like in `HooksInstalled`), or if iterating JSON arrays/objects, use `json.Decoder` or custom JSON parsing to reduce map allocations.

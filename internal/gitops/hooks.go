@@ -170,21 +170,14 @@ func HooksInstalled(claudeDir string) bool {
 		return false
 	}
 
-	var settings map[string]json.RawMessage
+	var settings struct {
+		Hooks map[string][]hookEntry `json:"hooks"`
+	}
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return false
 	}
 
-	var hooks map[string]json.RawMessage
-	raw, ok := settings["hooks"]
-	if !ok {
-		return false
-	}
-	if err := json.Unmarshal(raw, &hooks); err != nil {
-		return false
-	}
-
-	return hasSealHook(hooks, "SessionStart") && hasSealHook(hooks, "SessionEnd")
+	return hasSealHookFast(settings.Hooks, "SessionStart") && hasSealHookFast(settings.Hooks, "SessionEnd")
 }
 
 // addHookEntry appends a hook entry to an event's array, skipping if already present.
@@ -246,13 +239,9 @@ func removeHookEntries(hooks map[string]json.RawMessage, event string) {
 	hooks[event] = data
 }
 
-func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
-	raw, ok := hooks[event]
+func hasSealHookFast(hooks map[string][]hookEntry, event string) bool {
+	entries, ok := hooks[event]
 	if !ok {
-		return false
-	}
-	var entries []hookEntry
-	if err := json.Unmarshal(raw, &entries); err != nil {
 		return false
 	}
 	for _, e := range entries {
