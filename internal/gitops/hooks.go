@@ -239,25 +239,6 @@ func removeHookEntries(hooks map[string]json.RawMessage, event string) {
 	hooks[event] = data
 }
 
-func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
-	raw, ok := hooks[event]
-	if !ok {
-		return false
-	}
-	var entries []hookEntry
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		return false
-	}
-	for _, e := range entries {
-		for _, h := range e.Hooks {
-			if hasMarker(h.Command) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func hasSealHookFast(hooks map[string][]hookEntry, event string) bool {
 	entries, ok := hooks[event]
 	if !ok {
