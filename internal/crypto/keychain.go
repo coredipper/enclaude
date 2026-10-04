@@ -39,6 +39,15 @@ var (
 // layer wires this to ui.ReadPassphrase at startup.
 var DefaultPassphraseFunc PassphraseFunc
 
+// unlockedKeyFile remembers the key file's key once its passphrase has been
+// entered, so a command that needs the key twice (seal reading an encrypted
+// manifest, sync sealing then unsealing) prompts only once. It is tied to the
+// file's path and cleared whenever the file is written or deleted.
+var unlockedKeyFile struct {
+	path string
+	id   *age.X25519Identity
+}
+
 // StoreKey saves the age private key. It prefers the OS keyring; if the
 // keyring is unavailable (e.g. headless Linux without Secret Service), it
 // falls back to a passphrase-encrypted file under $XDG_CONFIG_HOME/enclaude.
@@ -105,6 +114,10 @@ func LoadKey() (*age.X25519Identity, string, error) {
 	}
 
 	if KeyFileExists() {
+		path := mustKeyFilePath()
+		if unlockedKeyFile.id != nil && unlockedKeyFile.path == path {
+			return unlockedKeyFile.id, SourceFile, nil
+		}
 		if DefaultPassphraseFunc == nil {
 			return nil, "", errors.New("encrypted key file present but no passphrase prompter configured")
 		}
@@ -116,6 +129,7 @@ func LoadKey() (*age.X25519Identity, string, error) {
 		if err != nil {
 			return nil, "", err
 		}
+		unlockedKeyFile.path, unlockedKeyFile.id = path, id
 		return id, SourceFile, nil
 	}
 

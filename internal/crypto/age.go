@@ -18,10 +18,10 @@ func GenerateKey() (*age.X25519Identity, error) {
 	return identity, nil
 }
 
-// Encrypt encrypts plaintext using the given age public key (recipient).
-func Encrypt(plaintext []byte, recipient age.Recipient) ([]byte, error) {
+// Encrypt encrypts plaintext to the given age public keys (recipients).
+func Encrypt(plaintext []byte, recipients ...age.Recipient) ([]byte, error) {
 	var buf bytes.Buffer
-	w, err := age.Encrypt(&buf, recipient)
+	w, err := age.Encrypt(&buf, recipients...)
 	if err != nil {
 		return nil, fmt.Errorf("creating age writer: %w", err)
 	}
@@ -34,9 +34,9 @@ func Encrypt(plaintext []byte, recipient age.Recipient) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Decrypt decrypts ciphertext using the given age identity (private key).
-func Decrypt(ciphertext []byte, identity age.Identity) ([]byte, error) {
-	r, err := age.Decrypt(bytes.NewReader(ciphertext), identity)
+// Decrypt decrypts ciphertext using any of the given age identities (private keys).
+func Decrypt(ciphertext []byte, identities ...age.Identity) ([]byte, error) {
+	r, err := age.Decrypt(bytes.NewReader(ciphertext), identities...)
 	if err != nil {
 		return nil, fmt.Errorf("creating age reader: %w", err)
 	}

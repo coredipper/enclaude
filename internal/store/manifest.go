@@ -1,11 +1,16 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	"filippo.io/age"
+	"github.com/coredipper/enclaude/internal/config"
+	"github.com/coredipper/enclaude/internal/crypto"
 )
 
 // Manifest tracks all files in the seal store with their content hashes and metadata.
@@ -21,6 +26,10 @@ type Manifest struct {
 	// next seal from an updated binary.
 	OriginHome string               `json:"origin_home,omitempty"`
 	Files      map[string]FileEntry `json:"files"`
+
+	// encrypted records whether the manifest was read from an encrypted
+	// file, so Seal can rewrite it when encrypt_names is switched.
+	encrypted bool
 }
 
 // FileEntry describes a single file in the seal store.
@@ -52,8 +61,25 @@ func NewManifest(deviceID string) *Manifest {
 	}
 }
 
-// Load reads a manifest from disk.
-func LoadManifest(sealDir string) (*Manifest, error) {
+// ageHeader starts every age file. A JSON manifest starts with "{", so the
+// header alone tells an encrypted manifest from a plaintext one.
+const ageHeader = "age-encryption.org/"
+
+// manifestIdentity supplies the key for an encrypted manifest when the caller
+// passes none, as Seal and Status are given only the public key. LoadKey
+// remembers an unlocked key file, so this does not prompt a second time.
+// Tests replace it.
+var manifestIdentity = func() (age.Identity, error) {
+	id, _, err := crypto.LoadKey()
+	if err != nil {
+		return nil, err
+	}
+	return id, nil
+}
+
+// LoadManifest reads a manifest from disk. An encrypted manifest is
+// decrypted with ids, or with the stored key when ids is empty.
+func LoadManifest(sealDir string, ids ...age.Identity) (*Manifest, error) {
 	path := filepath.Join(sealDir, "manifest.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -61,6 +87,26 @@ func LoadManifest(sealDir string) (*Manifest, error) {
 			return nil, nil // no manifest yet
 		}
 		return nil, fmt.Errorf("reading manifest: %w", err)
+	}
+	return ParseManifest(data, ids...)
+}
+
+// ParseManifest decodes manifest bytes, plaintext or encrypted, as read from
+// disk or from a git ref.
+func ParseManifest(data []byte, ids ...age.Identity) (*Manifest, error) {
+	encrypted := bytes.HasPrefix(data, []byte(ageHeader))
+	if encrypted {
+		if len(ids) == 0 {
+			id, err := manifestIdentity()
+			if err != nil {
+				return nil, fmt.Errorf("manifest is encrypted: %w", err)
+			}
+			ids = []age.Identity{id}
+		}
+		var err error
+		if data, err = crypto.Decrypt(data, ids...); err != nil {
+			return nil, fmt.Errorf("decrypting manifest: %w", err)
+		}
 	}
 
 	var m Manifest
@@ -70,18 +116,73 @@ func LoadManifest(sealDir string) (*Manifest, error) {
 	if m.Files == nil {
 		m.Files = make(map[string]FileEntry)
 	}
+	m.encrypted = encrypted
 	return &m, nil
 }
 
-// Save writes the manifest to disk.
-func (m *Manifest) Save(sealDir string) error {
-	m.SealedAt = time.Now().UTC().Format(time.RFC3339)
+// NameRecipients returns who manifest.json is encrypted to: r when the
+// config hides folder and file names, otherwise nobody, so it stays
+// plaintext.
+func NameRecipients(cfg *config.Config, r age.Recipient) []age.Recipient {
+	if !cfg.Seal.EncryptNames {
+		return nil
+	}
+	return []age.Recipient{r}
+}
+
+// Marshal encodes the manifest, encrypted to recipients when there are any.
+func (m *Manifest) Marshal(recipients ...age.Recipient) ([]byte, error) {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshaling manifest: %w", err)
+		return nil, fmt.Errorf("marshaling manifest: %w", err)
 	}
-	path := filepath.Join(sealDir, "manifest.json")
-	return os.WriteFile(path, data, 0600)
+	if len(recipients) == 0 {
+		return data, nil
+	}
+	return crypto.Encrypt(data, recipients...)
+}
+
+// Save writes the manifest to disk, encrypted to recipients when there are
+// any (see NameRecipients).
+func (m *Manifest) Save(sealDir string, recipients ...age.Recipient) error {
+	m.SealedAt = time.Now().UTC().Format(time.RFC3339)
+	data, err := m.Marshal(recipients...)
+	if err != nil {
+		return err
+	}
+	if err := WriteManifest(sealDir, data); err != nil {
+		return err
+	}
+	m.encrypted = len(recipients) > 0
+	return nil
+}
+
+// WriteManifest replaces manifest.json in sealDir with already encoded
+// manifest bytes.
+func WriteManifest(sealDir string, data []byte) error {
+	// Write beside the manifest and rename over it, so a command reading the
+	// manifest while a hook seals, or a crash mid-write, never sees half a
+	// file. That would fail to parse, and an encrypted one fails to decrypt.
+	f, err := os.CreateTemp(sealDir, ".manifest-*.tmp")
+	if err != nil {
+		return fmt.Errorf("writing manifest: %w", err)
+	}
+	defer func() { _ = os.Remove(f.Name()) }() // no-op once renamed
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("writing manifest: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("writing manifest: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("writing manifest: %w", err)
+	}
+	if err := os.Rename(f.Name(), filepath.Join(sealDir, "manifest.json")); err != nil {
+		return fmt.Errorf("writing manifest: %w", err)
+	}
+	return nil
 }
 
 // DiffResult describes the differences between two manifests.

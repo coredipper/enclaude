@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -93,5 +95,18 @@ func TestGitignoreContent_ForceTracksMetadata(t *testing.T) {
 		if !strings.Contains(gitignoreContent, neg) {
 			t.Errorf("gitignore is missing the %q re-include", neg)
 		}
+	}
+}
+
+// TestGitignoreContent_IgnoresManifestTempFiles checks with real git that a
+// temp file left by an interrupted manifest save is ignored, so `git add .`
+// never commits it, while manifest.json itself stays tracked.
+func TestGitignoreContent_IgnoresManifestTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	initTestGitRepo(t, dir)
+	writeTestFile(t, filepath.Join(dir, ".gitignore"), gitignoreContent)
+	runGit(t, dir, "check-ignore", "-q", ".manifest-123.tmp")
+	if out, err := exec.Command("git", "-C", dir, "check-ignore", "manifest.json").CombinedOutput(); err == nil {
+		t.Errorf("manifest.json is ignored: %s", out)
 	}
 }

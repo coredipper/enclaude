@@ -367,3 +367,91 @@ func TestDeleteKey_CombinedError_BothFailures(t *testing.T) {
 		t.Fatalf("error message missing file delete error context (expected file path to be present): %v", err)
 	}
 }
+
+// countPrompts replaces the stub prompter with one that answers from answers
+// in turn (repeating the last) and returns a pointer to the prompt count.
+func countPrompts(t *testing.T, answers ...string) *int {
+	t.Helper()
+	n := 0
+	DefaultPassphraseFunc = func(prompt string, confirm bool) (string, error) {
+		n++
+		return answers[min(n, len(answers))-1], nil
+	}
+	return &n
+}
+
+// TestLoadKey_KeyFilePromptsOnce guards against asking for the key file's
+// passphrase more than once per command: seal loads the key for encrypting
+// and again to read an encrypted manifest, and each load used to prompt.
+func TestLoadKey_KeyFilePromptsOnce(t *testing.T) {
+	withTestEnv(t)
+	id, _ := GenerateKey()
+	if err := StoreKeyFile(id, "test-passphrase"); err != nil {
+		t.Fatalf("StoreKeyFile: %v", err)
+	}
+	prompts := countPrompts(t, "test-passphrase")
+
+	for range 2 {
+		got, src, err := LoadKey()
+		if err != nil || src != SourceFile || got.String() != id.String() {
+			t.Fatalf("LoadKey = %v, %q, %v; want the stored key from the file", got, src, err)
+		}
+	}
+	if _, _, err := LoadPublicKey(); err != nil {
+		t.Fatalf("LoadPublicKey: %v", err)
+	}
+	if *prompts != 1 {
+		t.Errorf("prompted %d times, want 1", *prompts)
+	}
+}
+
+// TestLoadKey_WrongPassphraseIsNotRemembered verifies a failed unlock is not
+// cached, so the next load asks again and can succeed.
+func TestLoadKey_WrongPassphraseIsNotRemembered(t *testing.T) {
+	withTestEnv(t)
+	id, _ := GenerateKey()
+	if err := StoreKeyFile(id, "test-passphrase"); err != nil {
+		t.Fatalf("StoreKeyFile: %v", err)
+	}
+	prompts := countPrompts(t, "wrong", "test-passphrase")
+
+	if _, _, err := LoadKey(); err == nil {
+		t.Fatal("LoadKey with the wrong passphrase returned nil error")
+	}
+	if got, _, err := LoadKey(); err != nil || got.String() != id.String() {
+		t.Fatalf("LoadKey after a wrong passphrase = %v, %v; want the stored key", got, err)
+	}
+	if *prompts != 2 {
+		t.Errorf("prompted %d times, want 2", *prompts)
+	}
+}
+
+// TestLoadKey_ForgetsKeyWhenFileChanges verifies the remembered key is
+// dropped when the key file is replaced, as key rotation does, or deleted,
+// so LoadKey never hands back a key that is no longer stored.
+func TestLoadKey_ForgetsKeyWhenFileChanges(t *testing.T) {
+	withTestEnv(t)
+	oldID, _ := GenerateKey()
+	if err := StoreKeyFile(oldID, "test-passphrase"); err != nil {
+		t.Fatalf("StoreKeyFile: %v", err)
+	}
+	if _, _, err := LoadKey(); err != nil {
+		t.Fatalf("LoadKey: %v", err)
+	}
+
+	newID, _ := GenerateKey()
+	keyringSet = func(service, user, pass string) error { return errors.New("keyring unavailable") }
+	if _, err := StoreKey(newID); err != nil {
+		t.Fatalf("StoreKey: %v", err)
+	}
+	if got, _, err := LoadKey(); err != nil || got.String() != newID.String() {
+		t.Fatalf("LoadKey after StoreKey = %v, %v; want the new key", got, err)
+	}
+
+	if err := DeleteKey(); err != nil {
+		t.Fatalf("DeleteKey: %v", err)
+	}
+	if _, _, err := LoadKey(); err == nil || !contains(err.Error(), "no key found") {
+		t.Fatalf("LoadKey after DeleteKey error = %v, want no key found", err)
+	}
+}

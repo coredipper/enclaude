@@ -31,7 +31,7 @@ Most AI coding assistants work this way (Cursor, Copilot and Windsurf also store
      |  seal (encrypt)
      v
 ~/.enclaude/         encrypted git repo
-  manifest.json         file index: path -> SHA-256 hash, merge strategy
+  manifest.json         file index: path -> SHA-256 hash, merge strategy (optionally encrypted)
   seal.toml             config: include/exclude patterns, device ID
   key.age.backup        passphrase-encrypted key backup
   objects/              content-addressed age-encrypted blobs
@@ -136,6 +136,18 @@ enclaude hooks install
 ```
 
 This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a session starts, `enclaude` unseals the latest sealed data. When it ends, it seals changes locally. To enable automatic remote sync, set `auto_push = true` and `auto_pull = true` in `~/.enclaude/seal.toml`. The installer adds to your existing hooks (peon-ping, notchi, etc.) and never overwrites them.
+
+### Hiding Folder and File Names
+
+The encrypted objects are named by their hash, but `manifest.json` is plaintext by default and lists every folder and file name. A project folder like `job_hunting_canada` can say a lot on its own. To encrypt the manifest too, set up with:
+
+```bash
+enclaude init --encrypt-names
+```
+
+For an existing store, set `encrypt_names = true` under `[seal]` in `~/.enclaude/seal.toml` and run `enclaude seal`. The setting is synced with `seal.toml`, so every device writes the manifest the same way. Every device needs an `enclaude` version that supports it, as older versions refuse to seal a store with an encrypted manifest. Commits made before you turned it on still hold the plaintext manifest in your git history.
+
+Two things to know before turning it on. Git can't store an encrypted manifest as a small change to the previous one, so every seal commit adds the whole manifest to `~/.enclaude/.git`, which grows faster than with a plaintext manifest. And after `enclaude key rotate`, commits from before the rotation hold manifests encrypted to the old key, so `enclaude diff` against one of them fails.
 
 ## Commands
 
