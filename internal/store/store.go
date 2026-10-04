@@ -1353,7 +1353,7 @@ func Verify(cfg *config.Config, identity age.Identity, verbose bool) (*RepairRes
 }
 
 // Repair fixes seal store integrity issues.
-func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbose bool) (*RepairResult, error) {
+func Repair(cfg *config.Config, identity *age.X25519Identity, deleteOrphans bool, verbose bool) (*RepairResult, error) {
 	result, err := Verify(cfg, identity, verbose)
 	if err != nil {
 		return nil, err
@@ -1365,7 +1365,7 @@ func Repair(cfg *config.Config, identity age.Identity, deleteOrphans bool, verbo
 	}
 
 	store := NewObjectStore(cfg.Seal.SealDir)
-	recipient := identity.(*age.X25519Identity).Recipient()
+	recipient := identity.Recipient()
 
 	// Mirror Seal's PID-aware completion check so a Repair doesn't
 	// silently flip SessionComplete=true on currently-active session
