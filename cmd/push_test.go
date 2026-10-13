@@ -22,10 +22,10 @@ func TestPushE2E(t *testing.T) {
 	bareRemoteDir := t.TempDir()
 
 	// Override global flags
-	flagClaudeDir = claudeDir
+	flagSourceDir = claudeDir
 	flagSealDir = sealDir
 	t.Cleanup(func() {
-		flagClaudeDir = ""
+		flagSourceDir = ""
 		flagSealDir = ""
 	})
 

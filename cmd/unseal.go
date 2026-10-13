@@ -34,7 +34,7 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	cfg.Seal.ClaudeDir = getClaudeDir()
+	cfg.Seal.SourceDir = getSourceDir()
 
 	mode, err := resolveRemapMode()
 	if err != nil {
@@ -68,6 +68,12 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
+
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	identity, source, err := crypto.LoadKey()
 	if err != nil {

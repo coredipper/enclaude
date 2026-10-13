@@ -67,7 +67,7 @@ func TestBuildReadme(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildReadme(tt.publicKey, tt.deviceID)
+			got := buildReadmeForSource(tt.publicKey, tt.deviceID, "claude")
 			for _, s := range tt.contains {
 				if !strings.Contains(got, s) {
 					t.Errorf("expected README to contain %q", s)

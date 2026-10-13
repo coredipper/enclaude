@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/store"
 )
 
@@ -429,5 +430,26 @@ func TestRotateKeyCore_LoadFailureSkipsEverything(t *testing.T) {
 	}
 	if len(tr.calls) != 1 || tr.calls[0] != "loadKey" {
 		t.Fatalf("call sequence = %v, want only [loadKey]", tr.calls)
+	}
+}
+
+// TestKeyRotateRefusesEnvKey guards that rotate refuses while ENCLAUDE_KEY is
+// set: the env override would shadow the newly stored key and leave the store
+// unreadable.
+func TestKeyRotateRefusesEnvKey(t *testing.T) {
+	sealDir := t.TempDir()
+	cfg := config.DefaultConfigForSource(config.SourcePi, t.TempDir(), sealDir)
+	if err := cfg.Save(sealDir); err != nil {
+		t.Fatal(err)
+	}
+	prev := flagSealDir
+	flagSealDir = sealDir
+	t.Cleanup(func() { flagSealDir = prev })
+
+	t.Setenv("ENCLAUDE_KEY", mustGen(t).String())
+
+	err := keyRotateCmd.RunE(keyRotateCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "ENCLAUDE_KEY") {
+		t.Fatalf("keyRotateCmd.RunE() error = %v, want an ENCLAUDE_KEY refusal", err)
 	}
 }

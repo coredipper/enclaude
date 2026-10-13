@@ -53,7 +53,7 @@ func BenchmarkStatus(b *testing.B) {
 	}
 
 	cfg := &config.Config{
-		Seal:    config.SealSection{ClaudeDir: claudeDir, SealDir: sealDir, DeviceID: "test-device"},
+		Seal:    config.SealSection{SourceDir: claudeDir, SealDir: sealDir, DeviceID: "test-device"},
 		Include: config.PatternSection{Patterns: []string{"*"}},
 	}
 
@@ -107,7 +107,7 @@ func BenchmarkUnsealStatus(b *testing.B) {
 	}
 
 	cfg := &config.Config{
-		Seal:    config.SealSection{ClaudeDir: claudeDir, SealDir: sealDir, DeviceID: "test-device"},
+		Seal:    config.SealSection{SourceDir: claudeDir, SealDir: sealDir, DeviceID: "test-device"},
 		Include: config.PatternSection{Patterns: []string{"*"}},
 	}
 

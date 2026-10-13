@@ -36,6 +36,9 @@ type FileEntry struct {
 	// either of which would let same-window content changes slip past.
 	ModTimeNs     int64  `json:"mtime_ns,omitempty"`
 	MergeStrategy string `json:"merge_strategy"`
+	// Mode is the file's permission bits (0o777). Zero means unknown; unseal
+	// falls back to 0600 and applies the mode explicitly after writing.
+	Mode uint32 `json:"mode,omitempty"`
 	// For JSONL files, track line count for efficient dedup merge
 	JSONLLineCount int `json:"jsonl_line_count,omitempty"`
 	// Whether a session file is complete (immutable)

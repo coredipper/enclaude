@@ -6,13 +6,13 @@ import (
 	"testing"
 )
 
-// TestLoadHookConfig_PinsClaudeDirLocally guards the session-hook entry point
+// TestLoadHookConfig_PinsSourceDirLocally guards the session-hook entry point
 // against trusting the synced seal.toml: claude_dir written by the machine that
 // ran init must be overridden with this machine's resolution. Otherwise a
 // session-end hook on a freshly cloned store seals against a nonexistent
 // foreign claude dir, scans zero files, and commits a manifest with every
 // entry deleted.
-func TestLoadHookConfig_PinsClaudeDirLocally(t *testing.T) {
+func TestLoadHookConfig_PinsSourceDirLocally(t *testing.T) {
 	sealDir := t.TempDir()
 	foreign := `config_version = 2
 
@@ -30,9 +30,9 @@ auto_unseal_on_session_start = true
 	}
 
 	localClaude := t.TempDir()
-	oldSealFlag, oldClaudeFlag := flagSealDir, flagClaudeDir
-	flagSealDir, flagClaudeDir = sealDir, localClaude
-	defer func() { flagSealDir, flagClaudeDir = oldSealFlag, oldClaudeFlag }()
+	oldSealFlag, oldClaudeFlag := flagSealDir, flagSourceDir
+	flagSealDir, flagSourceDir = sealDir, localClaude
+	defer func() { flagSealDir, flagSourceDir = oldSealFlag, oldClaudeFlag }()
 
 	cfg, gotSealDir, ok := loadHookConfig()
 	if !ok {
@@ -41,9 +41,9 @@ auto_unseal_on_session_start = true
 	if gotSealDir != sealDir {
 		t.Errorf("sealDir = %q, want %q", gotSealDir, sealDir)
 	}
-	if cfg.Seal.ClaudeDir != localClaude {
-		t.Errorf("ClaudeDir = %q, want local %q (synced foreign value must not be trusted)",
-			cfg.Seal.ClaudeDir, localClaude)
+	if cfg.Seal.SourceDir != localClaude {
+		t.Errorf("SourceDir = %q, want local %q (synced foreign value must not be trusted)",
+			cfg.Seal.SourceDir, localClaude)
 	}
 	if cfg.Seal.SealDir != sealDir {
 		t.Errorf("SealDir = %q, want load location %q", cfg.Seal.SealDir, sealDir)

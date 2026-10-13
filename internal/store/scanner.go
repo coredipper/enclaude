@@ -17,6 +17,8 @@ type ScanResult struct {
 	Size int64
 	// ModTime as Unix timestamp (nanoseconds).
 	ModTimeNs int64
+	// Mode is the file's permission bits (0o777).
+	Mode uint32
 }
 
 // ScanFiles walks the claude directory and returns files matching
@@ -81,6 +83,7 @@ func ScanFiles(claudeDir string, includes, excludes []string) ([]ScanResult, err
 			AbsPath:   path,
 			Size:      info.Size(),
 			ModTimeNs: info.ModTime().UnixNano(),
+			Mode:      uint32(info.Mode().Perm()),
 		})
 		return nil
 	})

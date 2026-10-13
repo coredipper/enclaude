@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/gitops"
@@ -26,43 +27,63 @@ func init() {
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	claudeDir := getClaudeDir()
+	source := getSource()
+	sourceDir := getSourceDir()
 	sealDir := getSealDir()
 
-	// Check claude directory exists
-	if _, err := os.Stat(claudeDir); os.IsNotExist(err) {
-		return fmt.Errorf("claude directory not found at %s", claudeDir)
+	// Check source directory exists
+	if _, err := os.Stat(sourceDir); os.IsNotExist(err) {
+		return fmt.Errorf("%s directory not found at %s", source, sourceDir)
 	}
 
 	// Check seal directory doesn't already exist
 	if _, err := os.Stat(filepath.Join(sealDir, "seal.toml")); err == nil {
 		return fmt.Errorf("seal store already initialized at %s", sealDir)
 	}
+	// Refuse to re-initialize over existing data: a fresh key could not
+	// decrypt the referenced objects and Seal would skip them as unchanged.
+	if _, err := os.Stat(filepath.Join(sealDir, "manifest.json")); err == nil {
+		return fmt.Errorf("seal store data already exists at %s (manifest.json present); import the existing key with 'enclaude key import' instead of re-initializing", sealDir)
+	}
 
 	fmt.Println("Initializing enclaude...")
-	fmt.Printf("  Claude dir: %s\n", claudeDir)
-	fmt.Printf("  Seal dir:  %s\n", sealDir)
+	fmt.Printf("  Source:     %s\n", source)
+	fmt.Printf("  Source dir: %s\n", sourceDir)
+	fmt.Printf("  Seal dir:   %s\n", sealDir)
 
 	// 1. Generate age keypair
-	fmt.Println("\nGenerating age keypair...")
-	identity, err := crypto.GenerateKey()
-	if err != nil {
-		return fmt.Errorf("generating key: %w", err)
-	}
-	fmt.Printf("  Public key: %s\n", identity.Recipient().String())
+	// 1. Pick the key. ENCLAUDE_KEY overrides everything, so when set init must
+	// use it (a generated key would be shadowed by the env var on every later
+	// command). Otherwise generate a fresh keypair and store it.
+	var identity *age.X25519Identity
+	if id, set, err := crypto.EnvIdentity(); err != nil {
+		return err
+	} else if set {
+		identity = id
+		fmt.Println("\nUsing key from ENCLAUDE_KEY.")
+		fmt.Printf("  Public key: %s\n", identity.Recipient().String())
+	} else {
+		fmt.Println("\nGenerating age keypair...")
+		id, err := crypto.GenerateKey()
+		if err != nil {
+			return fmt.Errorf("generating key: %w", err)
+		}
+		identity = id
+		fmt.Printf("  Public key: %s\n", identity.Recipient().String())
 
-	// 2. Store private key (OS keyring, or passphrase-encrypted file fallback)
-	fmt.Println("Storing private key...")
-	source, err := crypto.StoreKey(identity)
-	if err != nil {
-		return fmt.Errorf("storing key: %w", err)
-	}
-	switch source {
-	case crypto.SourceKeyring:
-		fmt.Println("  Stored in OS keyring.")
-	case crypto.SourceFile:
-		path, _ := crypto.KeyFilePath()
-		fmt.Printf("  Stored in encrypted key file: %s\n", path)
+		// 2. Store private key (OS keyring, or passphrase-encrypted file fallback)
+		fmt.Println("Storing private key...")
+		keySource, err := crypto.StoreKey(identity)
+		if err != nil {
+			return fmt.Errorf("storing key: %w", err)
+		}
+		switch keySource {
+		case crypto.SourceKeyring:
+			fmt.Println("  Stored in OS keyring.")
+		case crypto.SourceFile:
+			path, _ := crypto.KeyFilePath()
+			fmt.Printf("  Stored in encrypted key file: %s\n", path)
+		}
 	}
 
 	// 3. Create seal directory
@@ -76,7 +97,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// 5. Write default config
-	cfg := config.DefaultConfig(claudeDir, sealDir)
+	cfg := config.DefaultConfigForSource(source, sourceDir, sealDir)
 	if err := cfg.Save(sealDir); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
@@ -101,7 +122,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write README
-	readme := buildReadme(identity.Recipient().String(), cfg.Seal.DeviceID)
+	readme := buildReadmeForSource(identity.Recipient().String(), cfg.Seal.DeviceID, source)
 	if err := os.WriteFile(filepath.Join(sealDir, "README.md"), []byte(readme), 0644); err != nil {
 		return fmt.Errorf("writing README: %w", err)
 	}
@@ -144,11 +165,14 @@ projectmap.local.toml
 !seal.toml
 !.gitattributes
 !README.md
+
+# Local-only state (present only if .git is unavailable)
+.enclaude-*.json
 `
 
 const readmeTemplate = `# enclaude seal store
 
-This repository contains an encrypted backup of a Claude Code configuration
+This repository contains an encrypted backup of a {SOURCE_NAME} configuration
 directory, managed by [enclaude](https://github.com/coredipper/enclaude).
 
 All files are encrypted with [age](https://age-encryption.org/) and cannot be
@@ -166,19 +190,22 @@ passphrase-encrypted key file under {TICK}$XDG_CONFIG_HOME/enclaude/{TICK}.
 
 | Field      | Value                    |
 |------------|--------------------------|
+| Source     | {SOURCE}                 |
 | Public key | {PUBLIC_KEY} |
 | Device ID  | {DEVICE_ID} |
 
 ## Restoring on a new machine
 
 1. Install enclaude.
-2. Clone this repository to {TICK}~/.enclaude/{TICK}:
-   {TICK}git clone <remote-url> ~/.enclaude{TICK}
+2. Clone this repository to {TICK}{SEAL_DIR}{TICK}:
+   {TICK}git clone <remote-url> {SEAL_DIR}{TICK}
 3. Import your private key (into the OS keyring if available, otherwise into
    a local passphrase-encrypted key file):
    {TICK}enclaude key import --from-backup{TICK} (or {TICK}enclaude key import keyfile.txt{TICK})
-4. Decrypt and restore your Claude files:
+4. Decrypt and restore your {SOURCE_NAME} files:
    {TICK}enclaude unseal{TICK}
+
+{PI_NOTE}
 
 ## Key recovery
 
@@ -225,10 +252,24 @@ func createKeyBackup(sealDir, secretKey string) error {
 	return nil
 }
 
-func buildReadme(publicKey, deviceID string) string {
+func buildReadmeForSource(publicKey, deviceID, source string) string {
+	source = config.NormalizeSource(source)
+	sourceName := "Claude Code"
+	sealDir := "~/.enclaude"
+	piNote := ""
+	if source == config.SourcePi {
+		sourceName = "pi.dev"
+		sealDir = "~/.enclaude-pi"
+		piNote = "For pi.dev, " + "`~/.enclaude-pi`" + " is the default seal store. Use\n" +
+			"`--source pi` (or `ENCLAUDE_SOURCE=pi`) with every command."
+	}
 	return strings.NewReplacer(
 		"{PUBLIC_KEY}", publicKey,
 		"{DEVICE_ID}", deviceID,
+		"{SOURCE}", source,
+		"{SOURCE_NAME}", sourceName,
+		"{SEAL_DIR}", sealDir,
+		"{PI_NOTE}", piNote,
 		"{TICK}", "`",
 		"{FENCE}", "```",
 	).Replace(readmeTemplate)

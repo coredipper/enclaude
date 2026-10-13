@@ -23,10 +23,10 @@ func TestRollbackE2E(t *testing.T) {
 	sealDir := t.TempDir()
 
 	// Override global flags
-	flagClaudeDir = claudeDir
+	flagSourceDir = claudeDir
 	flagSealDir = sealDir
 	t.Cleanup(func() {
-		flagClaudeDir = ""
+		flagSourceDir = ""
 		flagSealDir = ""
 	})
 
@@ -176,10 +176,10 @@ func TestRollbackAbort(t *testing.T) {
 	claudeDir := t.TempDir()
 	sealDir := t.TempDir()
 
-	flagClaudeDir = claudeDir
+	flagSourceDir = claudeDir
 	flagSealDir = sealDir
 	t.Cleanup(func() {
-		flagClaudeDir = ""
+		flagSourceDir = ""
 		flagSealDir = ""
 	})
 

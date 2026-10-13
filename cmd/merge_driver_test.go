@@ -17,10 +17,10 @@ import (
 func TestMergeManifests_CorruptAncestorFails(t *testing.T) {
 	claudeDir := t.TempDir()
 	sealDir := t.TempDir()
-	flagClaudeDir = claudeDir
+	flagSourceDir = claudeDir
 	flagSealDir = sealDir
 	t.Cleanup(func() {
-		flagClaudeDir = ""
+		flagSourceDir = ""
 		flagSealDir = ""
 	})
 

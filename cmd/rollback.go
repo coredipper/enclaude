@@ -34,7 +34,13 @@ func runRollback(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg.Seal.ClaudeDir = getClaudeDir()
+	cfg.Seal.SourceDir = getSourceDir()
+
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	git := gitops.New(sealDir)
 	identity, _, err := crypto.LoadKey()

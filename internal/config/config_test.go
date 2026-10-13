@@ -154,8 +154,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected Version %d, got %d", ConfigVersion, cfg.Version)
 	}
 
-	if cfg.Seal.ClaudeDir != claudeDir {
-		t.Errorf("expected ClaudeDir %q, got %q", claudeDir, cfg.Seal.ClaudeDir)
+	if cfg.Seal.SourceDir != claudeDir {
+		t.Errorf("expected SourceDir %q, got %q", claudeDir, cfg.Seal.SourceDir)
 	}
 
 	if cfg.Seal.SealDir != sealDir {
@@ -210,5 +210,43 @@ func TestDefaultConfig(t *testing.T) {
 		if got, ok := cfg.Merge[k]; !ok || got != v {
 			t.Errorf("expected merge strategy %q for %q, got %q", v, k, got)
 		}
+	}
+}
+
+// TestDefaultConfigForSourcePi verifies the pi profile selects the pi include,
+// exclude and merge defaults and does not leak Claude's.
+func TestDefaultConfigForSourcePi(t *testing.T) {
+	cfg := DefaultConfigForSource("pi", "/tmp/pi-agent", "/tmp/seal")
+	if cfg.Source() != SourcePi {
+		t.Fatalf("Source() = %q, want pi", cfg.Source())
+	}
+	if cfg.Seal.SourceDir != "/tmp/pi-agent" {
+		t.Errorf("SourceDir = %q", cfg.Seal.SourceDir)
+	}
+	if _, ok := cfg.Merge["sessions/**/*.jsonl"]; !ok {
+		t.Error("pi defaults missing sessions/**/*.jsonl merge strategy")
+	}
+	if _, ok := cfg.Merge["history.jsonl"]; ok {
+		t.Error("claude history strategy leaked into pi config")
+	}
+}
+
+// TestLoadMigratesLegacyClaudeDir guards the v2 -> v3 rename: the legacy
+// claude_dir key becomes source_dir and is cleared so it is never written back.
+func TestLoadMigratesLegacyClaudeDir(t *testing.T) {
+	sealDir := t.TempDir()
+	content := "config_version = 2\n[seal]\nclaude_dir = \"/tmp/legacy\"\nseal_dir = \"/tmp/seal\"\ndevice_id = \"d\"\n"
+	if err := os.WriteFile(filepath.Join(sealDir, "seal.toml"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(sealDir)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.Seal.SourceDir != "/tmp/legacy" {
+		t.Errorf("SourceDir = %q, want /tmp/legacy", cfg.Seal.SourceDir)
+	}
+	if cfg.Seal.LegacyClaudeDir != "" {
+		t.Error("legacy key should be cleared")
 	}
 }
