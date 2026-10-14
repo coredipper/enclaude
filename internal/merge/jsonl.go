@@ -195,6 +195,97 @@ func parseJSONLineBytes(line []byte, obj map[string]interface{}) ([32]byte, floa
 }
 
 func extractSessionId(raw json.RawMessage) string {
+	// Fast path: A simple tokenizer to find the top level "sessionId" key without
+	// full unmarshaling. This avoids creating massive garbage from reflecting into
+	// maps or structs when scanning large arrays of sessions.
+	inString := false
+	escaped := false
+	depth := 0
+
+	// We are looking for "sessionId" as a top-level key (depth == 1).
+	// A key is a string immediately followed by a colon (ignoring whitespace).
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+			continue
+		}
+		if c == '"' {
+			inString = !inString
+			if inString && depth == 1 {
+				// We might be at the start of a key.
+				// Check if the string matches "sessionId" exactly.
+				if i+10 < len(raw) && bytes.Equal(raw[i:i+11], []byte(`"sessionId"`)) {
+					j := i + 11
+
+					isKey := false
+					for j < len(raw) {
+						if raw[j] == ' ' || raw[j] == '\t' || raw[j] == '\n' || raw[j] == '\r' {
+							j++
+						} else if raw[j] == ':' {
+							isKey = true
+							j++
+							break
+						} else {
+							break
+						}
+					}
+
+					if isKey {
+						// We found the key. Now parse the value (we expect a string).
+						for j < len(raw) {
+							if raw[j] == ' ' || raw[j] == '\t' || raw[j] == '\n' || raw[j] == '\r' {
+								j++
+							} else {
+								break
+							}
+						}
+
+						if j < len(raw) && raw[j] == '"' {
+							start := j + 1
+							end := start
+							hasEscape := false
+							for end < len(raw) && raw[end] != '"' {
+								if raw[end] == '\\' {
+									hasEscape = true
+									end++
+									if end < len(raw) { // skip the escaped char
+										end++
+									}
+								} else {
+									end++
+								}
+							}
+							if end < len(raw) { // found closing quote
+								if !hasEscape {
+									return string(raw[start:end])
+								}
+							}
+						}
+						// If we couldn't parse it simply (e.g., complex escapes or not a string),
+						// break to fallback logic.
+						break
+					}
+				}
+			}
+			continue
+		}
+
+		if !inString {
+			switch c {
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+			}
+		}
+	}
+
+	// Fallback for complex escaping or non-string values
 	var obj struct {
 		SessionID string `json:"sessionId"`
 	}

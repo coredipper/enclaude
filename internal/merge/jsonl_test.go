@@ -452,3 +452,27 @@ func BenchmarkMergeJSONLLarge(b *testing.B) {
 		}
 	}
 }
+
+func TestExtractSessionId(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"simple", `{"sessionId":"123"}`, "123"},
+		{"with spaces", `{"sessionId": "123" }`, "123"},
+		{"other fields", `{"other":1,"sessionId":"123"}`, "123"},
+		{"escaped newline fallback", `{"sessionId":"123\n"}`, "123\n"},
+		{"null", `{"sessionId":null}`, ""},
+		{"nested object fallback", `{"user": {"sessionId": "stale_id"}, "sessionId": "active_id"}`, "active_id"},
+		{"array fallback", `{"items": [1,2,3], "sessionId": "456"}`, "456"},
+		{"missing", `{"other": 123}`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractSessionId(json.RawMessage(tt.in)); got != tt.want {
+				t.Errorf("extractSessionId() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
