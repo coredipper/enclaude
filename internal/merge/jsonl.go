@@ -194,14 +194,34 @@ func parseJSONLineBytes(line []byte, obj map[string]interface{}) ([32]byte, floa
 	return sha256.Sum256(normalized), ts
 }
 
+var sessionIdKey = []byte(`"sessionId"`)
+
 func extractSessionId(raw json.RawMessage) string {
-	var obj struct {
-		SessionID string `json:"sessionId"`
+	idx := 0
+	for {
+		found := bytes.Index(raw[idx:], sessionIdKey)
+		if found == -1 {
+			return ""
+		}
+
+		currIdx := idx + found + len(sessionIdKey)
+
+		// Skip whitespace and colon
+		for currIdx < len(raw) && (raw[currIdx] == ' ' || raw[currIdx] == '\t' || raw[currIdx] == '\n' || raw[currIdx] == '\r' || raw[currIdx] == ':') {
+			currIdx++
+		}
+
+		if currIdx < len(raw) && raw[currIdx] == '"' {
+			currIdx++
+			endIdx := bytes.IndexByte(raw[currIdx:], '"')
+			if endIdx != -1 {
+				return string(raw[currIdx : currIdx+endIdx])
+			}
+		}
+
+		// False positive (e.g. key embedded in another string), search next
+		idx += found + len(sessionIdKey)
 	}
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		return obj.SessionID
-	}
-	return ""
 }
 
 func parseIndexFile(data []byte) (map[string]json.RawMessage, []json.RawMessage, error) {
