@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -168,6 +169,13 @@ func HooksInstalled(claudeDir string) bool {
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
 		return false
+	}
+
+	// Fast path: if the file contains the hook marker, we can skip JSON parsing.
+	// This is safe because only enclaude writes this specific marker string
+	// and it avoids unmarshaling potentially large settings files on every run.
+	if bytes.Contains(data, []byte(hookMarker)) {
+		return true
 	}
 
 	var settings map[string]json.RawMessage
