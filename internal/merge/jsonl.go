@@ -194,7 +194,45 @@ func parseJSONLineBytes(line []byte, obj map[string]interface{}) ([32]byte, floa
 	return sha256.Sum256(normalized), ts
 }
 
+var sessionIdPrefix = []byte(`"sessionId"`)
+
 func extractSessionId(raw json.RawMessage) string {
+	// Fast path: simple string extraction without unmarshaling.
+	// We avoid the overhead of JSON parsing for typical session entry lines.
+	idx := bytes.Index(raw, sessionIdPrefix)
+	if idx != -1 {
+		// Only use fast path if there's exactly one occurrence to avoid ambiguity
+		if bytes.LastIndex(raw, sessionIdPrefix) == idx {
+			start := idx + len(sessionIdPrefix)
+			// Skip whitespace and colon
+			for start < len(raw) && (raw[start] == ' ' || raw[start] == '\t' || raw[start] == '\n' || raw[start] == '\r' || raw[start] == ':') {
+				start++
+			}
+
+			// Extract string value
+			if start < len(raw) && raw[start] == '"' {
+				start++
+				end := start
+				hasEscape := false
+				for end < len(raw) && raw[end] != '"' {
+					if raw[end] == '\\' {
+						hasEscape = true
+						end++
+						if end >= len(raw) {
+							break
+						}
+					}
+					end++
+				}
+				// If valid termination and no escapes, we can safely slice
+				if end < len(raw) && !hasEscape {
+					return string(raw[start:end])
+				}
+			}
+		}
+	}
+
+	// Fallback for escapes, complex JSON, or multiple keys
 	var obj struct {
 		SessionID string `json:"sessionId"`
 	}
