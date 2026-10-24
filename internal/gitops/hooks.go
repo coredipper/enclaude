@@ -1,6 +1,7 @@
 package gitops
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +13,8 @@ import (
 // Detection uses a simple strings.Contains on this marker, avoiding
 // any need to parse shell quoting or tokenization.
 const hookMarker = "# enclaude-managed"
+
+var hookMarkerBytes = []byte(hookMarker)
 
 // resolveExecutable returns the absolute path to the currently running binary.
 // Package-level var so tests can override it.
@@ -170,21 +173,32 @@ func HooksInstalled(claudeDir string) bool {
 		return false
 	}
 
-	var settings map[string]json.RawMessage
+	if bytes.Count(data, hookMarkerBytes) < 2 {
+		return false
+	}
+
+	var settings struct {
+		Hooks map[string]json.RawMessage `json:"hooks"`
+	}
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return false
 	}
 
-	var hooks map[string]json.RawMessage
-	raw, ok := settings["hooks"]
-	if !ok {
-		return false
-	}
-	if err := json.Unmarshal(raw, &hooks); err != nil {
+	if settings.Hooks == nil {
 		return false
 	}
 
-	return hasSealHook(hooks, "SessionStart") && hasSealHook(hooks, "SessionEnd")
+	hasStart := false
+	if startRaw, ok := settings.Hooks["SessionStart"]; ok {
+		hasStart = bytes.Contains(startRaw, hookMarkerBytes)
+	}
+
+	hasEnd := false
+	if endRaw, ok := settings.Hooks["SessionEnd"]; ok {
+		hasEnd = bytes.Contains(endRaw, hookMarkerBytes)
+	}
+
+	return hasStart && hasEnd
 }
 
 // addHookEntry appends a hook entry to an event's array, skipping if already present.
@@ -244,25 +258,6 @@ func removeHookEntries(hooks map[string]json.RawMessage, event string) {
 
 	data, _ := json.Marshal(filtered)
 	hooks[event] = data
-}
-
-func hasSealHook(hooks map[string]json.RawMessage, event string) bool {
-	raw, ok := hooks[event]
-	if !ok {
-		return false
-	}
-	var entries []hookEntry
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		return false
-	}
-	for _, e := range entries {
-		for _, h := range e.Hooks {
-			if hasMarker(h.Command) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // hasMarker checks whether a command carries the enclaude marker comment.
