@@ -363,7 +363,8 @@ func activeSessionIDs(claudeDir string) map[string]bool {
 
 // isSessionPath matches the on-disk shape of a Claude session transcript.
 func isSessionPath(relPath string) bool {
-	return strings.HasPrefix(relPath, "projects/") && strings.HasSuffix(relPath, ".jsonl")
+	l := len(relPath)
+	return l >= 15 && relPath[:9] == "projects/" && relPath[l-6:] == ".jsonl"
 }
 
 // isTopLevelSessionPath narrows isSessionPath to Claude transcript files at

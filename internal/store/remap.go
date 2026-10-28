@@ -112,7 +112,8 @@ func encodedHomePrefix(seg string) string {
 // boundary (exact, or followed by '-'), so "-Users-bob" matches "-Users-bob-x"
 // but not "-Users-bobby".
 func hasEncodedPrefix(s, prefix string) bool {
-	return s == prefix || strings.HasPrefix(s, prefix+"-")
+	l1, l2 := len(s), len(prefix)
+	return l1 >= l2 && s[:l2] == prefix && (l1 == l2 || s[l2] == '-')
 }
 
 // swapEncodedPrefix replaces a leading oldEnc segment of s with newEnc, matched
