@@ -170,21 +170,17 @@ func HooksInstalled(claudeDir string) bool {
 		return false
 	}
 
-	var settings map[string]json.RawMessage
+	var settings struct {
+		Hooks map[string]json.RawMessage `json:"hooks"`
+	}
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return false
 	}
-
-	var hooks map[string]json.RawMessage
-	raw, ok := settings["hooks"]
-	if !ok {
-		return false
-	}
-	if err := json.Unmarshal(raw, &hooks); err != nil {
+	if settings.Hooks == nil {
 		return false
 	}
 
-	return hasSealHook(hooks, "SessionStart") && hasSealHook(hooks, "SessionEnd")
+	return hasSealHook(settings.Hooks, "SessionStart") && hasSealHook(settings.Hooks, "SessionEnd")
 }
 
 // addHookEntry appends a hook entry to an event's array, skipping if already present.
