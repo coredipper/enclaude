@@ -137,6 +137,38 @@ enclaude hooks install
 
 This adds `SessionStart` and `SessionEnd` hooks to `~/.claude/settings.json`. When a session starts, `enclaude` unseals the latest sealed data. When it ends, it seals changes locally. To enable automatic remote sync, set `auto_push = true` and `auto_pull = true` in `~/.enclaude/seal.toml`. The installer adds to your existing hooks (peon-ping, notchi, etc.) and never overwrites them.
 
+## pi.dev Support
+
+enclaude seals pi.dev's agent data the same way, using a **source profile**. Pi stores
+its state in `~/.pi/agent` (or `$PI_CODING_AGENT_DIR`); enclaude seals it into a
+separate store so both agents can coexist.
+
+| | Claude Code | pi.dev |
+|---|---|---|
+| Flag | `--source claude` (default) | `--source pi` |
+| Source dir | `~/.claude` | `~/.pi/agent` / `$PI_CODING_AGENT_DIR` |
+| Default seal store | `~/.enclaude` | `~/.enclaude-pi` |
+| Hooks | `settings.json` hooks | managed `extensions/enclaude.ts` |
+
+```bash
+export ENCLAUDE_SOURCE=pi      # or pass --source pi to every command
+enclaude init --source pi
+enclaude seal --source pi
+enclaude unseal --source pi
+enclaude hooks install --source pi
+```
+
+Sealed: `settings.json`, `models*.json`, `keybindings.json`, `mcp.json`,
+instructions (`AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, …),
+`sessions/**/*.jsonl`, and user resources (`extensions/`, `skills/`, `prompts/`,
+`themes/`, `tools/`). Pi sessions merge as `immutable` (union).
+
+Excluded: `bin/`, `npm/`, logs, `extensions/enclaude.ts`, and the device-local
+credentials/trust files `auth.json`, `oauth.json`, `mcp-auth.json`, `trust.json`.
+Credentials are not synced; keep them per device via environment variables, the
+`!command` secret-manager references pi supports in `auth.json`, or a `/login`
+on each machine.
+
 ## Commands
 
 ### Core
@@ -202,7 +234,10 @@ These strategies are configurable per path pattern in `seal.toml`.
 
 ```toml
 [seal]
-claude_dir = "~/.claude"
+# "claude" or "pi". Selects the default include/exclude/merge profile.
+source = "claude"
+# Directory being sealed. Formerly claude_dir (still accepted on load).
+source_dir = "~/.claude"
 seal_dir = "~/.enclaude"
 device_id = "macbook-ab12cd34"
 
@@ -238,6 +273,11 @@ patterns = [
 ```
 
 The example above is abbreviated; the default configuration includes additional include/exclude patterns and merge strategies.
+
+The `source_dir`/`source` values are informational: commands use the locally
+selected profile (`--source`/`ENCLAUDE_SOURCE`) and its default directory, or
+`--source-dir`, never the synced value. `seal_dir` is likewise pinned to the
+location the config was loaded from.
 
 ## Security Model
 
@@ -285,7 +325,7 @@ Claude Code runs (reads/writes ~/.claude/ as normal)
 Session ends → hook fires → seal changes + push (if auto_push)
 ```
 
-The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent concurrent seal/unseal operations. If it can't get the lock within 5 seconds, the hook exits quietly so Claude Code is never blocked.
+The hook handler acquires a file lock (`~/.enclaude/.seal.lock`) to prevent concurrent seal/unseal operations. If it can't get the lock within 5 seconds, the hook exits quietly so Claude Code is never blocked. Mutating CLI commands (`seal`, `unseal`, `pull`, `push`, `sync`, `repair`, `rollback`, `key rotate`) take the same lock (waiting up to 30 seconds), so a manual command and a session hook cannot race on the manifest. The lock is released before the outbound `git push` so a long transfer does not stall a session hook.
 
 ### New Device Onboarding
 

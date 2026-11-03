@@ -83,6 +83,21 @@ func StoreKey(identity *age.X25519Identity) (string, error) {
 	return SourceFile, nil
 }
 
+// EnvIdentity returns the identity from ENCLAUDE_KEY if it is set. Unlike
+// LoadKey it does not consult the keyring or file fallback, so callers such as
+// `init` can honor the override without triggering a passphrase prompt.
+func EnvIdentity() (*age.X25519Identity, bool, error) {
+	envKey := os.Getenv(envKeyVar)
+	if envKey == "" {
+		return nil, false, nil
+	}
+	id, err := ParseIdentity(envKey)
+	if err != nil {
+		return nil, true, fmt.Errorf("parsing %s: %w", envKeyVar, err)
+	}
+	return id, true, nil
+}
+
 // LoadKey retrieves the age private key, trying (in order):
 //  1. ENCLAUDE_KEY environment variable
 //  2. OS keyring

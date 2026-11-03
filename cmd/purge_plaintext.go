@@ -40,12 +40,18 @@ func runPurgePlaintext(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-	cfg.Seal.ClaudeDir = getClaudeDir()
+	cfg.Seal.SourceDir = getSourceDir()
+
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	if purgeAllManaged && !purgeForce && !flagYes && !flagDryRun {
 		return fmt.Errorf("refusing --all-managed without --yes or --force")
 	}
-	if session.HasActiveSessions(cfg.Seal.ClaudeDir) && !purgeForce && !flagDryRun {
+	if session.HasActiveSessions(cfg.Seal.SourceDir) && !purgeForce && !flagDryRun {
 		return fmt.Errorf("active Claude Code session detected; refusing to purge plaintext while Claude may be writing (use --force to override)")
 	}
 

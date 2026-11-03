@@ -38,7 +38,13 @@ func runSync(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg.Seal.ClaudeDir = getClaudeDir()
+	cfg.Seal.SourceDir = getSourceDir()
+
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	git := gitops.New(sealDir)
 
@@ -101,6 +107,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	// 3. Push
 	fmt.Printf("3/3 Pushing to %s/%s...\n", remote, branch)
+	release() // network phase; keep session hooks unblocked
 	var pushStats gitops.PushStats
 	var pushOut string
 	if git.HasUpstream() {

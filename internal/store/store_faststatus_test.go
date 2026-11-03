@@ -23,7 +23,7 @@ func fastPathFixture(t *testing.T, content []byte) (*config.Config, string) {
 	}
 
 	cfg := &config.Config{
-		Seal:    config.SealSection{ClaudeDir: claudeDir, SealDir: sealDir, DeviceID: "test"},
+		Seal:    config.SealSection{SourceDir: claudeDir, SealDir: sealDir, DeviceID: "test"},
 		Include: config.PatternSection{Patterns: []string{"*"}},
 	}
 	return cfg, filePath
@@ -345,7 +345,7 @@ func TestStatus_LoadManifestError(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Seal: config.SealSection{ClaudeDir: claudeDir, SealDir: sealDir, DeviceID: "test"},
+		Seal: config.SealSection{SourceDir: claudeDir, SealDir: sealDir, DeviceID: "test"},
 	}
 
 	_, err := Status(cfg)
@@ -375,7 +375,7 @@ func TestStatus_ScanFilesError(t *testing.T) {
 	})
 
 	cfg := &config.Config{
-		Seal:    config.SealSection{ClaudeDir: claudeDir, SealDir: sealDir, DeviceID: "test"},
+		Seal:    config.SealSection{SourceDir: claudeDir, SealDir: sealDir, DeviceID: "test"},
 		Include: config.PatternSection{Patterns: []string{"sub/file.txt"}},
 	}
 
@@ -397,7 +397,7 @@ func TestStatus_ReadFileError(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Seal:    config.SealSection{ClaudeDir: claudeDir, SealDir: sealDir, DeviceID: "test"},
+		Seal:    config.SealSection{SourceDir: claudeDir, SealDir: sealDir, DeviceID: "test"},
 		Include: config.PatternSection{Patterns: []string{"*"}},
 	}
 
@@ -417,9 +417,11 @@ func TestStatus_ReadFileError(t *testing.T) {
 		t.Fatalf("unexpected error when a file fails to read: %v", err)
 	}
 
-	// Since data.txt couldn't be read, it won't be in the 'current' manifest,
-	// so diff will mark it as deleted relative to the initial manifest.
-	if len(diff.Deleted) != 1 {
-		t.Fatalf("expected 1 deleted file (could not be read), got %d", len(diff.Deleted))
+	// data.txt couldn't be read, so it isn't in the 'current' manifest.
+	// Deletions are now decided against the local managed ledger and the
+	// on-disk presence, and the file still exists on disk, so it must not be
+	// reported as deleted (it is simply not a sealable change right now).
+	if len(diff.Deleted) != 0 {
+		t.Fatalf("expected 0 deleted files for an unreadable-but-present file, got %d", len(diff.Deleted))
 	}
 }

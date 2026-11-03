@@ -367,3 +367,28 @@ func TestDeleteKey_CombinedError_BothFailures(t *testing.T) {
 		t.Fatalf("error message missing file delete error context (expected file path to be present): %v", err)
 	}
 }
+
+// TestEnvIdentity guards that init honors ENCLAUDE_KEY: the environment key is
+// returned without consulting the keyring or the passphrase key file, so init
+// does not generate a key the env override would shadow.
+func TestEnvIdentity(t *testing.T) {
+	withTestEnv(t) // clears ENCLAUDE_KEY and isolates the key file and keyring
+
+	if _, set, err := EnvIdentity(); err != nil || set {
+		t.Fatalf("EnvIdentity() with no env key = (set=%v, err=%v), want (false, nil)", set, err)
+	}
+
+	id, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envKeyVar, id.String())
+
+	got, set, err := EnvIdentity()
+	if err != nil || !set {
+		t.Fatalf("EnvIdentity() with an env key = (set=%v, err=%v), want (true, nil)", set, err)
+	}
+	if got.String() != id.String() {
+		t.Errorf("EnvIdentity() = %q, want %q", got.String(), id.String())
+	}
+}

@@ -60,7 +60,7 @@ type RemapPlan struct {
 
 // homeDir returns the local machine's home directory: the parent of ~/.claude
 // when claudeDir points there, else os.UserHomeDir(). After config.Load +
-// getClaudeDir, cfg.Seal.ClaudeDir is the local ~/.claude, so its parent is the
+// getSourceDir, cfg.Seal.SourceDir is the local ~/.claude, so its parent is the
 // home where this machine's projects live.
 func homeDir(claudeDir string) string {
 	home := strings.TrimSuffix(claudeDir, string(filepath.Separator)+".claude")
@@ -74,7 +74,7 @@ func homeDir(claudeDir string) string {
 
 // localHomeEnc returns the local machine's home directory in encoded form.
 func localHomeEnc(cfg *config.Config) string {
-	return encodePath(homeDir(cfg.Seal.ClaudeDir))
+	return encodePath(homeDir(cfg.Seal.SourceDir))
 }
 
 // encodedHomePrefix returns the leading encoded home-dir segment of an encoded
