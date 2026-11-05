@@ -194,12 +194,135 @@ func parseJSONLineBytes(line []byte, obj map[string]interface{}) ([32]byte, floa
 	return sha256.Sum256(normalized), ts
 }
 
+// extractSessionId manually extracts the "sessionId" field from a JSON object
+// byte slice without using json.Unmarshal. This is an optimization for the hot
+// path in MergeSessionsIndex to eliminate reflection overhead and slice allocations.
+// It uses a custom scanner to iterate over top-level keys to find `"sessionId"`,
+// safely skipping strings, arrays, and nested objects. It falls back to
+// json.Unmarshal only if string escape sequences are detected.
 func extractSessionId(raw json.RawMessage) string {
-	var obj struct {
-		SessionID string `json:"sessionId"`
+	i := 0
+	n := len(raw)
+
+	// Skip whitespace
+	for i < n && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r') {
+		i++
 	}
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		return obj.SessionID
+
+	if i >= n || raw[i] != '{' {
+		return ""
+	}
+	i++
+
+	for i < n {
+		// Skip whitespace and commas
+		for i < n && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r' || raw[i] == ',') {
+			i++
+		}
+		if i >= n || raw[i] == '}' {
+			break
+		}
+
+		// Expect a key (string)
+		if raw[i] != '"' {
+			return ""
+		}
+		i++
+		keyStart := i
+		for i < n {
+			if raw[i] == '\\' {
+				i += 2
+				continue
+			}
+			if raw[i] == '"' {
+				break
+			}
+			i++
+		}
+		if i >= n {
+			return ""
+		}
+
+		keyLen := i - keyStart
+		isTargetKey := keyLen == 9 && string(raw[keyStart:i]) == "sessionId"
+		i++ // skip closing quote
+
+		// Skip whitespace and colon
+		for i < n && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r' || raw[i] == ':') {
+			i++
+		}
+		if i >= n {
+			return ""
+		}
+
+		valStart := i
+		if raw[i] == '"' {
+			i++
+			hasEscape := false
+			for i < n {
+				if raw[i] == '\\' {
+					hasEscape = true
+					i += 2
+					continue
+				}
+				if raw[i] == '"' {
+					break
+				}
+				i++
+			}
+			if isTargetKey {
+				if i >= n {
+					return ""
+				}
+				if hasEscape {
+					var s string
+					if err := json.Unmarshal(raw[valStart:i+1], &s); err == nil {
+						return s
+					}
+					return ""
+				}
+				return string(raw[valStart+1:i])
+			}
+			i++ // skip closing quote
+		} else if raw[i] == '{' || raw[i] == '[' {
+			depth := 0
+			inString := false
+			for i < n {
+				if inString {
+					if raw[i] == '\\' {
+						i += 2
+						continue
+					}
+					if raw[i] == '"' {
+						inString = false
+					}
+				} else {
+					if raw[i] == '"' {
+						inString = true
+					} else if raw[i] == '{' || raw[i] == '[' {
+						depth++
+					} else if raw[i] == '}' || raw[i] == ']' {
+						depth--
+						if depth == 0 {
+							break
+						}
+					}
+				}
+				i++
+			}
+			if isTargetKey {
+				return ""
+			}
+			i++ // skip closing bracket
+		} else {
+			// number, boolean, null
+			for i < n && raw[i] != ',' && raw[i] != '}' && raw[i] != ' ' && raw[i] != '\t' && raw[i] != '\n' && raw[i] != '\r' {
+				i++
+			}
+			if isTargetKey {
+				return ""
+			}
+		}
 	}
 	return ""
 }
