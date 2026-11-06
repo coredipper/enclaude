@@ -36,6 +36,12 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 	cfg.Seal.ClaudeDir = getClaudeDir()
 
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	git := gitops.New(sealDir)
 
 	if !git.HasRemote(remote) {
@@ -70,6 +76,10 @@ func runPull(cmd *cobra.Command, args []string) error {
 		fmt.Println("  No local changes.")
 	}
 
+	// Release across the network fetch so a slow pull does not make the
+	// session hooks skip their seal. Re-acquire below before unsealing.
+	release()
+
 	// Pull (fetch + merge)
 	branch, _ := git.CurrentBranch()
 	fmt.Printf("Pulling from %s/%s...\n", remote, branch)
@@ -91,6 +101,12 @@ func runPull(cmd *cobra.Command, args []string) error {
 	}
 
 	// Unseal merged state
+	release, err = acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	identity, _, err := crypto.LoadKey()
 	if err != nil {
 		return err

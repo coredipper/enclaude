@@ -34,6 +34,12 @@ func runPush(cmd *cobra.Command, args []string) error {
 	}
 	cfg.Seal.ClaudeDir = getClaudeDir()
 
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	git := gitops.New(sealDir)
 
 	// Check remote exists
@@ -66,6 +72,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 	// Push
 	branch, _ := git.CurrentBranch()
 	fmt.Printf("Pushing to %s/%s...\n", remote, branch)
+	release() // network phase; keep session hooks unblocked
 
 	var pushStats gitops.PushStats
 	var pushOut string

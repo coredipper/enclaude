@@ -243,6 +243,12 @@ var keyRotateCmd = &cobra.Command{
 			return err
 		}
 
+		release, err := acquireSealLock(sealDir)
+		if err != nil {
+			return err
+		}
+		defer release()
+
 		deps := keyRotateDeps{
 			loadKey: func() (*age.X25519Identity, error) {
 				id, _, err := crypto.LoadKey()

@@ -69,6 +69,12 @@ func runUnseal(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	identity, source, err := crypto.LoadKey()
 	if err != nil {
 		return fmt.Errorf("loading key: %w", err)
