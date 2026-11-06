@@ -452,3 +452,34 @@ func BenchmarkMergeJSONLLarge(b *testing.B) {
 		}
 	}
 }
+
+func TestExtractSessionId(t *testing.T) {
+	tests := []struct {
+		name     string
+		payload  string
+		expected string
+	}{
+		{"basic", `{"sessionId": "123"}`, "123"},
+		{"with other fields", `{"other": "data", "sessionId": "456", "more": 123}`, "456"},
+		{"nested same key", `{"nested": {"sessionId": "789"}, "sessionId": "actual"}`, "actual"},
+		{"nested string with key name", `{"nested_string": "{\"sessionId\": \"wrong\"}", "sessionId": "right"}`, "right"},
+		{"no session id", `{"other": "data"}`, ""},
+		{"empty session id", `{"sessionId": ""}`, ""},
+		{"escaped quote in string before key", `{"other": "foo\"bar", "sessionId": "baz"}`, "baz"},
+		{"escaped quote in session id", `{"sessionId": "f\"oo"}`, "f\"oo"},
+		{"nested array before key", `{"arr": [1, 2, 3], "sessionId": "arr-sess"}`, "arr-sess"},
+		{"non-string type null", `{"sessionId": null}`, ""},
+		{"non-string type int", `{"sessionId": 123}`, ""},
+		{"non-string type bool", `{"sessionId": true}`, ""},
+		{"non-string type object", `{"sessionId": {}}`, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := extractSessionId([]byte(tt.payload))
+			if actual != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, actual)
+			}
+		})
+	}
+}

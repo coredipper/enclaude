@@ -194,13 +194,103 @@ func parseJSONLineBytes(line []byte, obj map[string]interface{}) ([32]byte, floa
 	return sha256.Sum256(normalized), ts
 }
 
+var sessionIdKey = []byte(`"sessionId"`)
+
 func extractSessionId(raw json.RawMessage) string {
-	var obj struct {
-		SessionID string `json:"sessionId"`
+	depth := 0
+	inString := false
+	escape := false
+	var stringStartIdx int
+
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+
+		if escape {
+			escape = false
+			continue
+		}
+
+		if c == '\\' {
+			escape = true
+			continue
+		}
+
+		if c == '"' {
+			if !inString {
+				inString = true
+				stringStartIdx = i
+			} else {
+				inString = false
+
+				// Check if the string we just closed is "sessionId" at depth 1
+				if depth == 1 && (i-stringStartIdx+1) == 11 && bytes.Equal(raw[stringStartIdx:i+1], sessionIdKey) {
+					// Verify it's a key by looking for a colon, skipping only whitespace
+					idx := i + 1
+					isKey := false
+					for idx < len(raw) {
+						if raw[idx] == ':' {
+							isKey = true
+							break
+						}
+						if raw[idx] != ' ' && raw[idx] != '\t' && raw[idx] != '\n' && raw[idx] != '\r' {
+							break
+						}
+						idx++
+					}
+
+					if isKey {
+						idx++ // skip colon
+
+						// Skip whitespace after colon
+						for idx < len(raw) && (raw[idx] == ' ' || raw[idx] == '\t' || raw[idx] == '\n' || raw[idx] == '\r') {
+							idx++
+						}
+
+						// Must be a string value to extract
+						if idx < len(raw) && raw[idx] == '"' {
+							idx++ // skip opening quote
+							startIdx := idx
+							hasEscape := false
+							for idx < len(raw) {
+								if raw[idx] == '\\' {
+									hasEscape = true
+									idx += 2
+									continue
+								}
+								if raw[idx] == '"' {
+									if hasEscape {
+										// Fallback to stdlib unmarshal for exact string unescaping correctness
+										var v string
+										if err := json.Unmarshal(raw[startIdx-1:idx+1], &v); err == nil {
+											return v
+										}
+										return ""
+									}
+									return string(raw[startIdx:idx])
+								}
+								idx++
+							}
+						}
+						// If we found the "sessionId" key but its value is not a string,
+						// or malformed, return empty string.
+						return ""
+					}
+				}
+			}
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		if c == '{' || c == '[' {
+			depth++
+		} else if c == '}' || c == ']' {
+			depth--
+		}
 	}
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		return obj.SessionID
-	}
+
 	return ""
 }
 
