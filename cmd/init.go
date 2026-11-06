@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/gitops"
@@ -46,26 +47,38 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Claude dir: %s\n", claudeDir)
 	fmt.Printf("  Seal dir:  %s\n", sealDir)
 
-	// 1. Generate age keypair
-	fmt.Println("\nGenerating age keypair...")
-	identity, err := crypto.GenerateKey()
-	if err != nil {
-		return fmt.Errorf("generating key: %w", err)
-	}
-	fmt.Printf("  Public key: %s\n", identity.Recipient().String())
+	// 1. Pick the key. ENCLAUDE_KEY overrides everything, so when set init must
+	// use it (a generated key would be shadowed by the env var on every later
+	// command). Otherwise generate a fresh keypair and store it.
+	var identity *age.X25519Identity
+	if id, set, err := crypto.EnvIdentity(); err != nil {
+		return err
+	} else if set {
+		identity = id
+		fmt.Println("\nUsing key from ENCLAUDE_KEY.")
+		fmt.Printf("  Public key: %s\n", identity.Recipient().String())
+	} else {
+		fmt.Println("\nGenerating age keypair...")
+		id, err := crypto.GenerateKey()
+		if err != nil {
+			return fmt.Errorf("generating key: %w", err)
+		}
+		identity = id
+		fmt.Printf("  Public key: %s\n", identity.Recipient().String())
 
-	// 2. Store private key (OS keyring, or passphrase-encrypted file fallback)
-	fmt.Println("Storing private key...")
-	source, err := crypto.StoreKey(identity)
-	if err != nil {
-		return fmt.Errorf("storing key: %w", err)
-	}
-	switch source {
-	case crypto.SourceKeyring:
-		fmt.Println("  Stored in OS keyring.")
-	case crypto.SourceFile:
-		path, _ := crypto.KeyFilePath()
-		fmt.Printf("  Stored in encrypted key file: %s\n", path)
+		// 2. Store private key (OS keyring, or passphrase-encrypted file fallback)
+		fmt.Println("Storing private key...")
+		keySource, err := crypto.StoreKey(identity)
+		if err != nil {
+			return fmt.Errorf("storing key: %w", err)
+		}
+		switch keySource {
+		case crypto.SourceKeyring:
+			fmt.Println("  Stored in OS keyring.")
+		case crypto.SourceFile:
+			path, _ := crypto.KeyFilePath()
+			fmt.Printf("  Stored in encrypted key file: %s\n", path)
+		}
 	}
 
 	// 3. Create seal directory
