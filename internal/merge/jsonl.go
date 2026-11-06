@@ -284,9 +284,10 @@ func extractSessionId(raw json.RawMessage) string {
 			continue
 		}
 
-		if c == '{' || c == '[' {
+		switch c {
+		case '{', '[':
 			depth++
-		} else if c == '}' || c == ']' {
+		case '}', ']':
 			depth--
 		}
 	}
