@@ -147,6 +147,31 @@ func TestEncryptNamesE2E_DiffWrongKey(t *testing.T) {
 	}
 }
 
+// TestEncryptNamesE2E_DiffAcrossKeyRotation verifies diff against a commit
+// from before `key rotate` names the rotation as the cause, rather than a
+// bare age error, since that commit's manifest is encrypted to the old key.
+func TestEncryptNamesE2E_DiffAcrossKeyRotation(t *testing.T) {
+	cfg, identity, git := encryptedStore(t)
+	writeAt(t, cfg.Seal.ClaudeDir, "commands/a.md", "A", time.Now())
+	sealAndCommit(t, cfg, identity, git, "commit A")
+
+	newIdentity, _ := crypto.GenerateKey()
+	if _, err := store.Rotate(cfg, identity, newIdentity.Recipient(), false, nil); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	if err := git.AddAll(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := git.Commit("rotate"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	t.Setenv("ENCLAUDE_KEY", newIdentity.String())
+
+	if err := runDiff(&cobra.Command{}, []string{"HEAD~1"}); err == nil || !strings.Contains(err.Error(), "previous key") {
+		t.Fatalf("runDiff across a rotation error = %v, want previous key error", err)
+	}
+}
+
 // TestEncryptNamesE2E_GitMergeRunsDriver has real git merge two branches
 // that each added a file. Git runs this test binary as the merge driver in
 // a child process and waits for it, so the test checks the result git keeps

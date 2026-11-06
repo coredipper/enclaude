@@ -213,6 +213,12 @@ func Seal(cfg *config.Config, recipient age.Recipient, verbose bool, progress Pr
 	if stats.HasChanges() || !existed ||
 		manifest.DeviceID != priorDeviceID || manifest.OriginHome != priorOriginHome ||
 		manifest.encrypted != cfg.Seal.EncryptNames {
+		// An older enclaude on another device can't tell an encrypted
+		// manifest from a broken one and fails with a JSON parse error, so
+		// say so on the device that makes the switch.
+		if cfg.Seal.EncryptNames && !manifest.encrypted {
+			fmt.Fprintln(os.Stderr, "  warning: manifest.json is now encrypted (encrypt_names = true). Upgrade enclaude on every device that syncs this store before it pulls, as older versions can't read an encrypted manifest.")
+		}
 		if err := manifest.Save(sealDir, NameRecipients(cfg, recipient)...); err != nil {
 			return stats, fmt.Errorf("saving manifest: %w", err)
 		}

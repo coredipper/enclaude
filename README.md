@@ -145,9 +145,9 @@ The encrypted objects are named by their hash, but `manifest.json` is plaintext 
 enclaude init --encrypt-names
 ```
 
-For an existing store, set `encrypt_names = true` under `[seal]` in `~/.enclaude/seal.toml` and run `enclaude seal`. The setting is synced with `seal.toml`, so every device writes the manifest the same way. Every device needs an `enclaude` version that supports it, as older versions refuse to seal a store with an encrypted manifest. Commits made before you turned it on still hold the plaintext manifest in your git history.
+For an existing store, set `encrypt_names = true` under `[seal]` in `~/.enclaude/seal.toml` and run `enclaude seal`. The setting is synced with `seal.toml`, so every device writes the manifest the same way. Upgrade `enclaude` on every device before you turn it on. Older versions can't read an encrypted manifest, so their seal, unseal and merge fail with a JSON parse error. Commits made before you turned it on still hold the plaintext manifest in your git history. `seal.toml` itself stays plaintext, and its `claude_dir` setting shows your home folder path and username.
 
-Two things to know before turning it on. Git can't store an encrypted manifest as a small change to the previous one, so every seal commit adds the whole manifest to `~/.enclaude/.git`, which grows faster than with a plaintext manifest. And after `enclaude key rotate`, commits from before the rotation hold manifests encrypted to the old key, so `enclaude diff` against one of them fails.
+Two things to know before turning it on. Git can't store an encrypted manifest as a small change to the previous one, so every seal commit adds the whole manifest to `~/.enclaude/.git`, which grows faster than with a plaintext manifest. And after `enclaude key rotate`, commits from before the rotation hold manifests encrypted to the old key, so `enclaude diff` can't compare against them.
 
 ## Commands
 

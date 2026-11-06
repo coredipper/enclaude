@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/gitops"
@@ -61,6 +63,12 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 
 	oldManifest, err := sealstore.ParseManifest([]byte(oldManifestJSON), identity)
+	var noMatch *age.NoIdentityMatchError
+	if errors.As(err, &noMatch) {
+		// The current manifest just opened with this key, so an older one
+		// that doesn't was sealed before the last `enclaude key rotate`.
+		return fmt.Errorf("manifest at %s is encrypted to a previous key, from before the last key rotation", ref)
+	}
 	if err != nil {
 		return fmt.Errorf("manifest at %s: %w", ref, err)
 	}

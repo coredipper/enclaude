@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -395,6 +396,36 @@ func TestSeal_SwitchingEncryptNamesRewritesManifest(t *testing.T) {
 		data, _ := os.ReadFile(path)
 		if got := bytes.HasPrefix(data, []byte(ageHeader)); got != encrypt {
 			t.Errorf("encrypt_names=%v: manifest encrypted = %v", encrypt, got)
+		}
+	}
+}
+
+// TestSeal_SwitchingEncryptNamesOnWarns verifies seal warns on stderr only
+// when it first writes an encrypted manifest, since older enclaude versions
+// on other devices fail to parse it and would otherwise just report a JSON
+// error. Unchanged seals and switching back off stay quiet.
+func TestSeal_SwitchingEncryptNamesOnWarns(t *testing.T) {
+	cfg, identity := encryptNamesSetup(t)
+	stderr, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	os.Stderr = stderr
+	t.Cleanup(func() { os.Stderr = orig })
+
+	for _, step := range []struct {
+		encrypt, warn bool
+	}{{false, false}, {true, true}, {true, false}, {false, false}} {
+		cfg.Seal.EncryptNames = step.encrypt
+		before, _ := stderr.Seek(0, io.SeekCurrent)
+		if _, err := Seal(cfg, identity.Recipient(), false, nil); err != nil {
+			t.Fatalf("Seal (encrypt_names=%v): %v", step.encrypt, err)
+		}
+		out := make([]byte, 4096)
+		n, _ := stderr.ReadAt(out, before)
+		if got := strings.Contains(string(out[:n]), "manifest.json is now encrypted"); got != step.warn {
+			t.Errorf("encrypt_names=%v: warned = %v, want %v (stderr %q)", step.encrypt, got, step.warn, out[:n])
 		}
 	}
 }
