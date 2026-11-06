@@ -140,6 +140,31 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+// TestEncryptNames_DefaultsOffAndRoundTrips verifies a seal.toml written
+// before encrypt_names existed loads with it off, so existing stores keep a
+// plaintext manifest, and that turning it on survives Save and Load.
+func TestEncryptNames_DefaultsOffAndRoundTrips(t *testing.T) {
+	sealDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sealDir, "seal.toml"), []byte("[seal]\ndevice_id = \"d\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(sealDir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Seal.EncryptNames {
+		t.Error("EncryptNames is on for a seal.toml without it")
+	}
+
+	cfg.Seal.EncryptNames = true
+	if err := cfg.Save(sealDir); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if cfg, err = Load(sealDir); err != nil || !cfg.Seal.EncryptNames {
+		t.Errorf("EncryptNames after Save and Load = %v (%v), want true", cfg.Seal.EncryptNames, err)
+	}
+}
+
 // TestDefaultConfig verifies DefaultConfig wires the given Claude and seal
 // dirs, sets a non-empty DeviceID and the current ConfigVersion, applies the
 // expected auto-seal/unseal defaults (push/pull off), and ships the full set

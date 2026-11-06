@@ -1,10 +1,11 @@
 package cmd
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/coredipper/enclaude/internal/config"
 	"github.com/coredipper/enclaude/internal/crypto"
 	"github.com/coredipper/enclaude/internal/gitops"
@@ -47,7 +48,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	store := sealstore.NewObjectStore(sealDir)
 
 	// Load current manifest
-	currentManifest, err := sealstore.LoadManifest(sealDir)
+	currentManifest, err := sealstore.LoadManifest(sealDir, identity)
 	if err != nil {
 		return fmt.Errorf("loading current manifest: %w", err)
 	}
@@ -61,16 +62,19 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot read manifest at %s: %w", ref, err)
 	}
 
-	var oldManifest sealstore.Manifest
-	if err := json.Unmarshal([]byte(oldManifestJSON), &oldManifest); err != nil {
-		return fmt.Errorf("parsing manifest at %s: %w", ref, err)
+	oldManifest, err := sealstore.ParseManifest([]byte(oldManifestJSON), identity)
+	var noMatch *age.NoIdentityMatchError
+	if errors.As(err, &noMatch) {
+		// The current manifest just opened with this key, so an older one
+		// that doesn't was sealed before the last `enclaude key rotate`.
+		return fmt.Errorf("manifest at %s is encrypted to a previous key, from before the last key rotation", ref)
 	}
-	if oldManifest.Files == nil {
-		oldManifest.Files = make(map[string]sealstore.FileEntry)
+	if err != nil {
+		return fmt.Errorf("manifest at %s: %w", ref, err)
 	}
 
 	// Diff manifests
-	diff := currentManifest.Diff(&oldManifest)
+	diff := currentManifest.Diff(oldManifest)
 
 	if len(diff.Added) == 0 && len(diff.Modified) == 0 && len(diff.Deleted) == 0 {
 		fmt.Printf("No changes between %s and current seal store.\n", ref)

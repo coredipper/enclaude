@@ -27,6 +27,10 @@ type SealSection struct {
 	ClaudeDir string `toml:"claude_dir"`
 	SealDir   string `toml:"seal_dir"`
 	DeviceID  string `toml:"device_id"`
+	// EncryptNames encrypts manifest.json, the only place folder and file
+	// names are written in the store. It lives here rather than per machine
+	// so every device writes the manifest the same way.
+	EncryptNames bool `toml:"encrypt_names"`
 }
 
 type SyncSection struct {

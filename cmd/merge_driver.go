@@ -66,16 +66,18 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 		return fmt.Errorf("reading theirs: %w", err)
 	}
 
-	var ancestor, ours, theirs sealstore.Manifest
+	ancestor := &sealstore.Manifest{}
 	if len(ancestorData) > 0 {
-		if err := json.Unmarshal(ancestorData, &ancestor); err != nil {
+		if ancestor, err = sealstore.ParseManifest(ancestorData, identity); err != nil {
 			return fmt.Errorf("parsing ancestor manifest: %w", err)
 		}
 	}
-	if err := json.Unmarshal(oursData, &ours); err != nil {
+	ours, err := sealstore.ParseManifest(oursData, identity)
+	if err != nil {
 		return fmt.Errorf("parsing ours manifest: %w", err)
 	}
-	if err := json.Unmarshal(theirsData, &theirs); err != nil {
+	theirs, err := sealstore.ParseManifest(theirsData, identity)
+	if err != nil {
 		return fmt.Errorf("parsing theirs manifest: %w", err)
 	}
 
@@ -120,7 +122,7 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 		}
 
 		// Different content - resolve conflict
-		resolvedEntry, err := resolveFileConflict(path, oursEntry, theirsEntry, ancestor, cfg, identity, objStore)
+		resolvedEntry, err := resolveFileConflict(path, oursEntry, theirsEntry, *ancestor, cfg, identity, objStore)
 		if err != nil {
 			return err
 		}
@@ -128,9 +130,9 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 	}
 
 	// Write merged manifest back to "ours" file (git convention)
-	mergedData, err := json.MarshalIndent(merged, "", "  ")
+	mergedData, err := merged.Marshal(sealstore.NameRecipients(cfg, identity.Recipient())...)
 	if err != nil {
-		return fmt.Errorf("marshaling merged manifest: %w", err)
+		return err
 	}
 
 	// Git expects the result written to the "ours" file
@@ -139,7 +141,7 @@ func mergeManifests(ancestorFile, oursFile, theirsFile string) error {
 	}
 
 	// Also update the actual manifest.json in the seal store
-	if err := os.WriteFile(cfg.Seal.SealDir+"/manifest.json", mergedData, 0600); err != nil {
+	if err := sealstore.WriteManifest(cfg.Seal.SealDir, mergedData); err != nil {
 		return fmt.Errorf("writing seal manifest: %w", err)
 	}
 

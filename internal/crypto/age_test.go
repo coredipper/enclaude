@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/base64"
 	"testing"
+
+	"filippo.io/age"
 )
 
 func TestGenerateKey(t *testing.T) {
@@ -56,6 +58,27 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 				t.Fatalf("round-trip failed: got %d bytes, want %d bytes", len(decrypted), len(tt.plaintext))
 			}
 		})
+	}
+}
+
+// TestEncryptDecrypt_MultipleKeys verifies Encrypt to several recipients can
+// be opened by each of them and Decrypt tries every identity it is given,
+// while a stranger's key is refused.
+func TestEncryptDecrypt_MultipleKeys(t *testing.T) {
+	a, _ := GenerateKey()
+	b, _ := GenerateKey()
+	stranger, _ := GenerateKey()
+	ct, err := Encrypt([]byte("names"), a.Recipient(), b.Recipient())
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	for _, id := range []*age.X25519Identity{a, b} {
+		if pt, err := Decrypt(ct, stranger, id); err != nil || string(pt) != "names" {
+			t.Errorf("Decrypt = %q, %v; want names", pt, err)
+		}
+	}
+	if _, err := Decrypt(ct, stranger); err == nil {
+		t.Error("Decrypt with a stranger's key succeeded")
 	}
 }
 

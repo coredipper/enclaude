@@ -21,7 +21,10 @@ var initCmd = &cobra.Command{
 	RunE:  runInit,
 }
 
+var initEncryptNames bool
+
 func init() {
+	initCmd.Flags().BoolVar(&initEncryptNames, "encrypt-names", false, "encrypt manifest.json so folder and file names are hidden too")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -77,6 +80,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// 5. Write default config
 	cfg := config.DefaultConfig(claudeDir, sealDir)
+	cfg.Seal.EncryptNames = initEncryptNames
 	if err := cfg.Save(sealDir); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
@@ -138,6 +142,9 @@ const gitignoreContent = `# Never commit the unencrypted key
 
 # Device-local project-key map — never synced
 projectmap.local.toml
+
+# Leftover from a manifest write interrupted by a crash
+.manifest-*.tmp
 
 # Always track seal store metadata, even under a global gitignore
 !manifest.json
