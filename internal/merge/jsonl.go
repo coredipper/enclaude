@@ -195,12 +195,103 @@ func parseJSONLineBytes(line []byte, obj map[string]interface{}) ([32]byte, floa
 }
 
 func extractSessionId(raw json.RawMessage) string {
-	var obj struct {
-		SessionID string `json:"sessionId"`
+	key := []byte(`"sessionId"`)
+
+	depth := 0
+	inString := false
+	escape := false
+
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+
+		if escape {
+			escape = false
+			continue
+		}
+
+		if c == '\\' {
+			escape = true
+			continue
+		}
+
+		if c == '"' {
+			if !inString && depth == 1 {
+				// We are at the start of a top-level string (could be a key)
+				if i+len(key) <= len(raw) && bytes.Equal(raw[i:i+len(key)], key) {
+					// Found `"sessionId"`. Now verify it's a key by looking for a colon.
+					colonFound := false
+					idx := i + len(key)
+					for j := idx; j < len(raw); j++ {
+						jc := raw[j]
+						if jc == ' ' || jc == '\t' || jc == '\n' || jc == '\r' {
+							continue
+						}
+						if jc == ':' {
+							colonFound = true
+							idx = j + 1
+							break
+						}
+						break
+					}
+
+					if colonFound {
+						// Find string value
+						valStart := -1
+						for j := idx; j < len(raw); j++ {
+							jc := raw[j]
+							if jc == ' ' || jc == '\t' || jc == '\n' || jc == '\r' {
+								continue
+							}
+							if jc == '"' {
+								valStart = j + 1
+								break
+							}
+							break
+						}
+
+						if valStart != -1 {
+							valEscape := false
+							for j := valStart; j < len(raw); j++ {
+								jc := raw[j]
+								if valEscape {
+									valEscape = false
+									continue
+								}
+								if jc == '\\' {
+									valEscape = true
+									continue
+								}
+								if jc == '"' {
+									v := raw[valStart:j]
+									// If the string contains an escape sequence, fall back to json.Unmarshal
+									if bytes.IndexByte(v, '\\') != -1 {
+										var s string
+										_ = json.Unmarshal(raw[valStart-1:j+1], &s)
+										return s
+									}
+									return string(v)
+								}
+							}
+						}
+					}
+				}
+			}
+
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		if c == '{' {
+			depth++
+		} else if c == '}' {
+			depth--
+		}
 	}
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		return obj.SessionID
-	}
+
 	return ""
 }
 
