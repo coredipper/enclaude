@@ -194,12 +194,90 @@ func parseJSONLineBytes(line []byte, obj map[string]interface{}) ([32]byte, floa
 	return sha256.Sum256(normalized), ts
 }
 
-func extractSessionId(raw json.RawMessage) string {
-	var obj struct {
-		SessionID string `json:"sessionId"`
-	}
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		return obj.SessionID
+func extractSessionId(raw []byte) string {
+	var inString bool
+	var escape bool
+	level := 0
+
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+
+		if escape {
+			escape = false
+			continue
+		}
+		if c == '\\' {
+			escape = true
+			continue
+		}
+
+		if c == '"' {
+			if !inString && level == 1 {
+				keyLen := 9 // len("sessionId")
+				if i+1+keyLen < len(raw) && string(raw[i+1:i+1+keyLen]) == "sessionId" && raw[i+1+keyLen] == '"' {
+					tempI := i + 1 + keyLen
+					isKey := false
+					for j := tempI + 1; j < len(raw); j++ {
+						c2 := raw[j]
+						if c2 == ' ' || c2 == '\t' || c2 == '\n' || c2 == '\r' {
+							continue
+						}
+						if c2 == ':' {
+							isKey = true
+							tempI = j
+						}
+						break
+					}
+
+					if isKey {
+						i = tempI
+						for j := i + 1; j < len(raw); j++ {
+							c3 := raw[j]
+							if c3 == ' ' || c3 == '\t' || c3 == '\n' || c3 == '\r' {
+								continue
+							}
+							if c3 == '"' {
+								start := j + 1
+								valEscape := false
+								for k := start; k < len(raw); k++ {
+									c4 := raw[k]
+									if valEscape {
+										valEscape = false
+										continue
+									}
+									if c4 == '\\' {
+										valEscape = true
+										continue
+									}
+									if c4 == '"' {
+										val := raw[start:k]
+										if !bytes.ContainsRune(val, '\\') {
+											return string(val)
+										}
+										var s string
+										json.Unmarshal(raw[j:k+1], &s)
+										return s
+									}
+								}
+							}
+							break
+						}
+					}
+				}
+			}
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		if c == '{' {
+			level++
+		} else if c == '}' {
+			level--
+		}
 	}
 	return ""
 }
