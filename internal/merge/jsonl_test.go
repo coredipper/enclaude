@@ -452,3 +452,51 @@ func BenchmarkMergeJSONLLarge(b *testing.B) {
 		}
 	}
 }
+
+func TestExtractSessionIdScanner(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple",
+			input:    `{"timestamp": 123456789, "sessionId": "sess_123456", "data": {"nested": "value"}}`,
+			expected: "sess_123456",
+		},
+		{
+			name:     "nested object with sessionId string",
+			input:    `{"data": {"val": "sessionId"}, "sessionId": "sess_2"}`,
+			expected: "sess_2",
+		},
+		{
+			name:     "string value identical to key name",
+			input:    `{"type": "sessionId", "sessionId": "sess_3"}`,
+			expected: "sess_3",
+		},
+		{
+			name:     "spaces before colon",
+			input:    `{"sessionId"   : "sess_4"}`,
+			expected: "sess_4",
+		},
+		{
+			name:     "escaped characters in value",
+			input:    `{"sessionId": "sess_5\n"}`,
+			expected: "sess_5\n",
+		},
+		{
+			name:     "not found",
+			input:    `{"other": "value"}`,
+			expected: "",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			actual := extractSessionId([]byte(c.input))
+			if actual != c.expected {
+				t.Errorf("Expected %q, got %q", c.expected, actual)
+			}
+		})
+	}
+}
