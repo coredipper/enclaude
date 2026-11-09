@@ -260,24 +260,25 @@ func extractSessionId(raw json.RawMessage) string {
 			continue
 		}
 
-		if c == '{' {
+		switch c {
+		case '{':
 			depth++
 			if depth == 1 {
 				expectKey = true
 			} else {
 				expectKey = false
 			}
-		} else if c == '[' {
+		case '[':
 			depth++
 			expectKey = false
-		} else if c == '}' || c == ']' {
+		case '}', ']':
 			depth--
 			expectKey = false
-		} else if c == ',' {
+		case ',':
 			if depth == 1 {
 				expectKey = true
 			}
-		} else if c == ':' {
+		case ':':
 			expectKey = false
 		}
 	}

@@ -20,9 +20,9 @@ func TestExtractSessionId(t *testing.T) {
 		{"escaped quote in value", `{"sessionId": "escaped\"val" }`, `escaped"val`},
 		{"spaces around colon", `{"sessionId":  "123"  }`, "123"},
 		{"complex realistic", `{"version": 1, "metadata": {"sessionId": "not-this-one", "some": "data"}, "something": "sessionId", "sessionId" :  "sess-12345678-abcd-efgh-ijkl-mnopqrstuvwx", "other": [1,2,3]}`, "sess-12345678-abcd-efgh-ijkl-mnopqrstuvwx"},
-        {"string value containing sessionid key", `{"key":"\"sessionId\": \"wrong\"","sessionId":"right"}`, "right"},
-        {"string value containing sessionid key (raw bytes)", `{"key": "sessionId : null", "sessionId": "real-id"}`, "real-id"},
-        {"string value mimicking key exactly", `{"message": "\"sessionId\" :", "sessionId": "real-id"}`, "real-id"},
+		{"string value containing sessionid key", `{"key":"\"sessionId\": \"wrong\"","sessionId":"right"}`, "right"},
+		{"string value containing sessionid key (raw bytes)", `{"key": "sessionId : null", "sessionId": "real-id"}`, "real-id"},
+		{"string value mimicking key exactly", `{"message": "\"sessionId\" :", "sessionId": "real-id"}`, "real-id"},
 	}
 
 	for _, tt := range tests {
