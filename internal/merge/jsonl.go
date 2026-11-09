@@ -195,11 +195,92 @@ func parseJSONLineBytes(line []byte, obj map[string]interface{}) ([32]byte, floa
 }
 
 func extractSessionId(raw json.RawMessage) string {
-	var obj struct {
-		SessionID string `json:"sessionId"`
-	}
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		return obj.SessionID
+	var depth int
+	var inString bool
+	var escape bool
+	var expectKey bool
+
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+
+		if escape {
+			escape = false
+			continue
+		}
+		if c == '\\' {
+			escape = true
+			continue
+		}
+
+		if c == '"' {
+			inString = !inString
+			if inString && depth == 1 && expectKey {
+				// We just entered a string at depth 1 (top-level key)
+				if i+10 < len(raw) && string(raw[i:i+11]) == `"sessionId"` {
+					j := i + 11
+					for j < len(raw) && (raw[j] == ' ' || raw[j] == '\t' || raw[j] == '\n' || raw[j] == '\r') {
+						j++
+					}
+					if j < len(raw) && raw[j] == ':' {
+						j++
+						for j < len(raw) && (raw[j] == ' ' || raw[j] == '\t' || raw[j] == '\n' || raw[j] == '\r') {
+							j++
+						}
+						if j < len(raw) && raw[j] == '"' {
+							start := j
+							j++
+							var hasEscape bool
+							var valEscape bool
+							for j < len(raw) {
+								if valEscape {
+									valEscape = false
+								} else if raw[j] == '\\' {
+									valEscape = true
+									hasEscape = true
+								} else if raw[j] == '"' {
+									if !hasEscape {
+										// Zero-allocation path for simple strings
+										return string(raw[start+1 : j])
+									}
+									var val string
+									_ = json.Unmarshal(raw[start:j+1], &val)
+									return val
+								}
+								j++
+							}
+						}
+						return ""
+					}
+				}
+			}
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		switch c {
+		case '{':
+			depth++
+			if depth == 1 {
+				expectKey = true
+			} else {
+				expectKey = false
+			}
+		case '[':
+			depth++
+			expectKey = false
+		case '}', ']':
+			depth--
+			expectKey = false
+		case ',':
+			if depth == 1 {
+				expectKey = true
+			}
+		case ':':
+			expectKey = false
+		}
 	}
 	return ""
 }
