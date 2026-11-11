@@ -195,11 +195,73 @@ func parseJSONLineBytes(line []byte, obj map[string]interface{}) ([32]byte, floa
 }
 
 func extractSessionId(raw json.RawMessage) string {
-	var obj struct {
-		SessionID string `json:"sessionId"`
-	}
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		return obj.SessionID
+	depth := 0
+	inString := false
+	escaped := false
+	expectKey := false
+
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+
+		if inString {
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		switch c {
+		case '"':
+			if depth == 1 && expectKey {
+				if i+10 < len(raw) &&
+					raw[i+1] == 's' && raw[i+2] == 'e' && raw[i+3] == 's' && raw[i+4] == 's' &&
+					raw[i+5] == 'i' && raw[i+6] == 'o' && raw[i+7] == 'n' && raw[i+8] == 'I' &&
+					raw[i+9] == 'd' && raw[i+10] == '"' {
+
+					j := i + 11
+					for j < len(raw) && (raw[j] == ' ' || raw[j] == '\t' || raw[j] == '\n' || raw[j] == '\r') {
+						j++
+					}
+					if j < len(raw) && raw[j] == ':' {
+						j++
+						for j < len(raw) && (raw[j] == ' ' || raw[j] == '\t' || raw[j] == '\n' || raw[j] == '\r') {
+							j++
+						}
+						if j < len(raw) && raw[j] == '"' {
+							j++
+							start := j
+							for j < len(raw) {
+								if raw[j] == '\\' {
+									j += 2
+								} else if raw[j] == '"' {
+									return string(raw[start:j])
+								} else {
+									j++
+								}
+							}
+						}
+					}
+				}
+			}
+			inString = true
+			expectKey = false
+		case '{':
+			depth++
+			expectKey = (depth == 1)
+		case '}':
+			depth--
+			expectKey = false
+		case ',':
+			expectKey = (depth == 1)
+		case ' ', '\t', '\n', '\r':
+			// skip
+		default:
+			expectKey = false
+		}
 	}
 	return ""
 }
