@@ -235,11 +235,12 @@ func extractSessionId(raw json.RawMessage) string {
 							j++
 							start := j
 							for j < len(raw) {
-								if raw[j] == '\\' {
+								switch raw[j] {
+								case '\\':
 									j += 2
-								} else if raw[j] == '"' {
+								case '"':
 									return string(raw[start:j])
-								} else {
+								default:
 									j++
 								}
 							}
