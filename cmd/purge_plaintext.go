@@ -42,6 +42,12 @@ func runPurgePlaintext(cmd *cobra.Command, args []string) error {
 	}
 	cfg.Seal.ClaudeDir = getClaudeDir()
 
+	release, err := acquireSealLock(sealDir)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	if purgeAllManaged && !purgeForce && !flagYes && !flagDryRun {
 		return fmt.Errorf("refusing --all-managed without --yes or --force")
 	}
