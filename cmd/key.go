@@ -245,8 +245,14 @@ var keyRotateCmd = &cobra.Command{
 
 		deps := keyRotateDeps{
 			loadKey: func() (*age.X25519Identity, error) {
-				id, _, err := crypto.LoadKey()
-				return id, err
+				id, source, err := crypto.LoadKey()
+				if err != nil {
+					return nil, err
+				}
+				if source == crypto.SourceEnv {
+					return nil, fmt.Errorf("key rotation is not supported while ENCLAUDE_KEY is set: the environment variable overrides the keychain and would shadow the new key; unset it and run again")
+				}
+				return id, nil
 			},
 			genKey: crypto.GenerateKey,
 			storeKey: func(id *age.X25519Identity) error {
