@@ -314,6 +314,7 @@ func processFile(f ScanResult, manifest *Manifest, store *ObjectStore, recipient
 		Mtime:           time.Unix(0, f.ModTimeNs).UTC().Format(time.RFC3339),
 		ModTimeNs:       f.ModTimeNs,
 		MergeStrategy:   ResolveMergeStrategy(f.RelPath, cfg.Merge),
+		Mode:            f.Mode,
 		JSONLLineCount:  lineCount,
 		SessionComplete: isSessionCompleteFor(f.RelPath, activeSessions),
 	}
@@ -413,6 +414,12 @@ func unsealFile(store *ObjectStore, identity age.Identity, entry FileEntry, absP
 	}
 	if err := os.WriteFile(absPath, plaintext, 0600); err != nil {
 		return 0, err
+	}
+	// Apply the recorded permission bits (WriteFile only honors the mode when
+	// creating a new file). Mask to 0o777 so setuid/setgid cannot be restored.
+	mode := os.FileMode(entry.Mode) & 0o777
+	if mode != 0 {
+		_ = os.Chmod(absPath, mode)
 	}
 	if entry.ModTimeNs != 0 {
 		mtime := time.Unix(0, entry.ModTimeNs)
@@ -1419,6 +1426,7 @@ func Repair(cfg *config.Config, identity *age.X25519Identity, deleteOrphans bool
 		if info, err := os.Stat(absPath); err == nil {
 			entry.Mtime = info.ModTime().UTC().Format(time.RFC3339)
 			entry.ModTimeNs = info.ModTime().UnixNano()
+			entry.Mode = uint32(info.Mode().Perm())
 		}
 		// Recompute JSONL line count
 		if strings.HasSuffix(path, ".jsonl") {
